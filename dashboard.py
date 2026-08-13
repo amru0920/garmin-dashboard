@@ -28,6 +28,7 @@ Data notes (checked against this account before writing this script):
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import math
 import os
@@ -38,12 +39,21 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from og_image import generate_og_image
+from training_plan import (
+    generate_default_plan,
+    load_plan_config,
+    merge_plan_with_actuals,
+    save_plan_config,
+)
+
 # --------------------------------------------------------------------------
 # Config -- edit these for your race and stats.
 # --------------------------------------------------------------------------
 
 RACE_NAME = "Penang Bridge Marathon"
 RACE_DATE = "2026-11-15"
+SITE_URL = "https://garmin-dashboard-ezq.pages.dev/"  # for og:image / og:url -- must be absolute
 
 HEIGHT_CM = 168
 WEIGHT_KG = 54
@@ -64,6 +74,8 @@ RECENT_RUNS_DAYS = 28        # window for the Runs table
 SCRIPT_DIR = Path(__file__).resolve().parent
 CACHE_PATH = SCRIPT_DIR / "dashboard_cache.json"
 OUTPUT_PATH = SCRIPT_DIR / "index.html"
+OG_IMAGE_PATH = SCRIPT_DIR / "og-image.png"
+PLAN_CONFIG_PATH = SCRIPT_DIR / "training_plan_config.json"
 
 RUNNING_TYPE_KEYS = {
     "running", "trail_running", "treadmill_running", "track_running",
@@ -294,6 +306,48 @@ def fetch_user_profile(client) -> dict:
         "birth_date": user_data.get("birthDate"),
         "vo2max_running": user_data.get("vo2MaxRunning"),
     }
+
+
+def fetch_intensity_minutes(client, on_date: str) -> Optional[dict]:
+    try:
+        raw = client.get_intensity_minutes_data(on_date)
+    except Exception as exc:
+        print(f"WARNING: failed to fetch intensity minutes: {exc}", file=sys.stderr)
+        return None
+    if not raw:
+        return None
+    return {
+        "weekly_moderate": raw.get("weeklyModerate"),
+        "weekly_vigorous": raw.get("weeklyVigorous"),
+        "weekly_total": raw.get("weeklyTotal"),
+        "week_goal": raw.get("weekGoal"),
+    }
+
+
+def fetch_fitness_age(client, on_date: str) -> Optional[dict]:
+    try:
+        raw = client.get_fitnessage_data(on_date)
+    except Exception as exc:
+        print(f"WARNING: failed to fetch fitness age: {exc}", file=sys.stderr)
+        return None
+    if not raw or raw.get("fitnessAge") is None:
+        return None
+    return {
+        "fitness_age": raw.get("fitnessAge"),
+        "chronological_age": raw.get("chronologicalAge"),
+        "achievable_fitness_age": raw.get("achievableFitnessAge"),
+    }
+
+
+def fetch_floors_available(client, on_date: str) -> bool:
+    """This account's devices (Forerunner 45/45S/55) have no barometric
+    altimeter, so this always comes back empty -- probed once per run so the
+    UI can say so plainly instead of silently showing nothing."""
+    try:
+        raw = client.get_floors(on_date) or {}
+    except Exception:
+        return False
+    return bool(raw.get("floorValuesArray"))
 
 
 # --------------------------------------------------------------------------
@@ -584,6 +638,14 @@ def main() -> None:
 
     profile = fetch_user_profile(client)
 
+    print("Fetching intensity minutes...")
+    intensity_minutes = fetch_intensity_minutes(client, today.isoformat())
+
+    print("Fetching fitness age...")
+    fitness_age = fetch_fitness_age(client, today.isoformat())
+
+    floors_available = fetch_floors_available(client, today.isoformat())
+
     save_cache(cache)
     print("Cache saved.")
 
@@ -610,12 +672,15 @@ def main() -> None:
 
     rhr_series = []
     stress_series = []
+    steps_series = []
     for d in recovery_days:
         stats = cache["daily_stats"].get(d) or {}
         if stats.get("resting_hr"):
             rhr_series.append({"date": d, "value": stats["resting_hr"]})
         if stats.get("avg_stress") is not None:
             stress_series.append({"date": d, "avg": stats["avg_stress"], "max": stats.get("max_stress")})
+        if stats.get("steps"):
+            steps_series.append({"date": d, "value": stats["steps"]})
     rhr_values = [p["value"] for p in rhr_series]
     for i, p in enumerate(rhr_series):
         window = rhr_values[max(0, i - 6):i + 1]
@@ -629,6 +694,14 @@ def main() -> None:
     latest_vo2 = vo2max_trend[-1]["value"] if vo2max_trend else profile.get("vo2max_running")
     latest_rhr = rhr_series[-1]["value"] if rhr_series else None
     latest_stress = stress_series[-1]["avg"] if stress_series else None
+
+    # ---- training plan: generated once, then never silently overwritten ----
+    plan_config = None if REGEN_PLAN else load_plan_config(PLAN_CONFIG_PATH)
+    if plan_config is None:
+        plan_config = generate_default_plan(RACE_DATE, today, weekly_mileage, latest_load.get("ctl", 0))
+        save_plan_config(PLAN_CONFIG_PATH, plan_config)
+        print(f"{'Regenerated' if REGEN_PLAN else 'Generated'} {PLAN_CONFIG_PATH.name}.")
+    plan_weeks = merge_plan_with_actuals(plan_config, weekly_mileage, today)
 
     data = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -646,10 +719,19 @@ def main() -> None:
         "vo2max": {"current": latest_vo2, "trend": vo2max_trend},
         "weekly_mileage": weekly_mileage,
         "training_load": training_load,
-        "recovery": {
+        "wellness": {
             "rhr": rhr_series,
             "stress": stress_series,
             "body_battery": body_battery,
+            "steps": steps_series,
+            "intensity_minutes": intensity_minutes,
+            "fitness_age": fitness_age,
+            "floors_available": floors_available,
+        },
+        "plan": {
+            "weeks": plan_weeks,
+            "baseline_weekly_km": plan_config.get("baseline_weekly_km"),
+            "generated_on": plan_config.get("generated_on"),
         },
         "runs": runs,
         "recent_runs_days": RECENT_RUNS_DAYS,
@@ -670,9 +752,12 @@ def main() -> None:
         ),
     }
 
+    print("Generating OG image...")
+    generate_og_image(data, OG_IMAGE_PATH)
+
     print("Rendering index.html...")
-    html = render_html(data)
-    OUTPUT_PATH.write_text(html, encoding="utf-8")
+    page = render_html(data)
+    OUTPUT_PATH.write_text(page, encoding="utf-8")
     print(f"Done. Wrote {OUTPUT_PATH}")
     print(f"Open it with: file:///{OUTPUT_PATH.as_posix()}")
 
@@ -686,7 +771,24 @@ def main() -> None:
 
 def render_html(data: dict) -> str:
     from dashboard_template import TEMPLATE
-    return TEMPLATE.replace("__DASHBOARD_DATA__", json.dumps(data))
+
+    def fmt(v):
+        return f"{v:.1f}" if isinstance(v, (int, float)) else "?"
+
+    stat = data["stat_tiles"]
+    og_title = f"Training Dashboard — {data['race']['days_left']} days to {data['race']['name']}"
+    og_desc = (
+        f"Fitness {fmt(stat.get('fitness'))} · Fatigue {fmt(stat.get('fatigue'))} · "
+        f"Form {fmt(stat.get('form'))} · VO2max {fmt(stat.get('vo2max'))}"
+    )
+    og_image_url = SITE_URL.rstrip("/") + "/" + OG_IMAGE_PATH.name
+
+    rendered = TEMPLATE.replace("__DASHBOARD_DATA__", json.dumps(data))
+    rendered = rendered.replace("__OG_TITLE__", html.escape(og_title))
+    rendered = rendered.replace("__OG_DESC__", html.escape(og_desc))
+    rendered = rendered.replace("__OG_IMAGE_URL__", html.escape(og_image_url))
+    rendered = rendered.replace("__OG_URL__", html.escape(SITE_URL))
+    return rendered
 
 
 # --------------------------------------------------------------------------
@@ -717,13 +819,19 @@ def deploy() -> None:
         )
         return
 
-    add = _run_git("add", "index.html")
+    files = ["index.html"]
+    if OG_IMAGE_PATH.exists():
+        files.append(OG_IMAGE_PATH.name)
+    if PLAN_CONFIG_PATH.exists():
+        files.append(PLAN_CONFIG_PATH.name)
+
+    add = _run_git("add", *files)
     if add.returncode != 0:
-        print(f"WARNING: 'git add index.html' failed: {add.stderr.strip()}", file=sys.stderr)
+        print(f"WARNING: 'git add' failed: {add.stderr.strip()}", file=sys.stderr)
         return
 
-    if _run_git("diff", "--cached", "--quiet", "--", "index.html").returncode == 0:
-        print("No change in index.html -- nothing to commit.")
+    if _run_git("diff", "--cached", "--quiet", "--", *files).returncode == 0:
+        print("No changes -- nothing to commit.")
         return
 
     commit = _run_git(
@@ -738,7 +846,7 @@ def deploy() -> None:
         print(f"WARNING: git push failed: {push.stderr.strip()}", file=sys.stderr)
         return
 
-    print("Pushed updated index.html to origin.")
+    print("Pushed updated files to origin.")
 
 
 if __name__ == "__main__":
@@ -747,6 +855,12 @@ if __name__ == "__main__":
         "--no-push", action="store_true",
         help="Build index.html only; skip the git commit/push step.",
     )
+    parser.add_argument(
+        "--regen-plan", action="store_true",
+        help="Force-regenerate training_plan_config.json from current fitness/mileage "
+             "(overwrites any manual edits to the plan).",
+    )
     args = parser.parse_args()
     PUSH_ENABLED = not args.no_push
+    REGEN_PLAN = args.regen_plan
     main()

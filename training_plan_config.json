@@ -1,0 +1,106 @@
+{
+  "race_date": "2026-11-15",
+  "generated_on": "2026-08-13",
+  "generated_from_ctl": 12.1,
+  "baseline_weekly_km": 9.9,
+  "weeks": [
+    {
+      "week_num": 1,
+      "week_start": "2026-08-10",
+      "phase": "base",
+      "target_km": 9.9,
+      "key_workout": "Easy aerobic mileage + 4-6 strides, 1 longer easy run"
+    },
+    {
+      "week_num": 2,
+      "week_start": "2026-08-17",
+      "phase": "base",
+      "target_km": 10.5,
+      "key_workout": "Easy aerobic mileage + 4-6 strides, 1 longer easy run"
+    },
+    {
+      "week_num": 3,
+      "week_start": "2026-08-24",
+      "phase": "base",
+      "target_km": 11.2,
+      "key_workout": "Easy aerobic mileage + 4-6 strides, 1 longer easy run"
+    },
+    {
+      "week_num": 4,
+      "week_start": "2026-08-31",
+      "phase": "base",
+      "target_km": 8.9,
+      "key_workout": "Easy aerobic mileage + 4-6 strides, 1 longer easy run"
+    },
+    {
+      "week_num": 5,
+      "week_start": "2026-09-07",
+      "phase": "base",
+      "target_km": 11.9,
+      "key_workout": "Easy aerobic mileage + 4-6 strides, 1 longer easy run"
+    },
+    {
+      "week_num": 6,
+      "week_start": "2026-09-14",
+      "phase": "base",
+      "target_km": 12.7,
+      "key_workout": "Easy aerobic mileage + 4-6 strides, 1 longer easy run"
+    },
+    {
+      "week_num": 7,
+      "week_start": "2026-09-21",
+      "phase": "build",
+      "target_km": 13.5,
+      "key_workout": "Add 1 tempo/threshold run + short VO2max intervals (e.g. 6x400m)"
+    },
+    {
+      "week_num": 8,
+      "week_start": "2026-09-28",
+      "phase": "build",
+      "target_km": 10.8,
+      "key_workout": "Add 1 tempo/threshold run + short VO2max intervals (e.g. 6x400m)"
+    },
+    {
+      "week_num": 9,
+      "week_start": "2026-10-05",
+      "phase": "build",
+      "target_km": 14.4,
+      "key_workout": "Add 1 tempo/threshold run + short VO2max intervals (e.g. 6x400m)"
+    },
+    {
+      "week_num": 10,
+      "week_start": "2026-10-12",
+      "phase": "build",
+      "target_km": 15.3,
+      "key_workout": "Add 1 tempo/threshold run + short VO2max intervals (e.g. 6x400m)"
+    },
+    {
+      "week_num": 11,
+      "week_start": "2026-10-19",
+      "phase": "peak",
+      "target_km": 15.3,
+      "key_workout": "Race-pace intervals (10K/5K pace) + 1 sharpening session"
+    },
+    {
+      "week_num": 12,
+      "week_start": "2026-10-26",
+      "phase": "peak",
+      "target_km": 15.3,
+      "key_workout": "Race-pace intervals (10K/5K pace) + 1 sharpening session"
+    },
+    {
+      "week_num": 13,
+      "week_start": "2026-11-02",
+      "phase": "taper",
+      "target_km": 9.2,
+      "key_workout": "Short, race-pace touches only -- cut volume, keep legs sharp"
+    },
+    {
+      "week_num": 14,
+      "week_start": "2026-11-09",
+      "phase": "taper",
+      "target_km": 6.1,
+      "key_workout": "Short, race-pace touches only -- cut volume, keep legs sharp"
+    }
+  ]
+}

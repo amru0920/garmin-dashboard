@@ -1,6 +1,6 @@
 """HTML/CSS/JS template for dashboard.py. Kept in its own module so dashboard.py
-stays readable. TEMPLATE.replace("__DASHBOARD_DATA__", json.dumps(data)) produces
-the final self-contained index.html."""
+stays readable. TEMPLATE.replace("__DASHBOARD_DATA__", json.dumps(data)) (plus the
+__OG_*__ meta-tag placeholders) produces the final self-contained index.html."""
 
 TEMPLATE = r"""<!doctype html>
 <html lang="en">
@@ -8,6 +8,15 @@ TEMPLATE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Training Dashboard</title>
+<meta property="og:type" content="website">
+<meta property="og:title" content="__OG_TITLE__">
+<meta property="og:description" content="__OG_DESC__">
+<meta property="og:image" content="__OG_IMAGE_URL__">
+<meta property="og:url" content="__OG_URL__">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="__OG_TITLE__">
+<meta name="twitter:description" content="__OG_DESC__">
+<meta name="twitter:image" content="__OG_IMAGE_URL__">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
 :root {
@@ -28,6 +37,9 @@ TEMPLATE = r"""<!doctype html>
   --good:     #0ca30c;
   --warning:  #fab219;
   --critical: #d03b3b;
+  --shadow-card: 0 1px 2px rgba(11,11,11,0.05), 0 4px 14px rgba(11,11,11,0.045);
+  --sp-1: 8px; --sp-2: 12px; --sp-3: 16px; --sp-4: 20px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 40px; --sp-8: 48px;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -45,9 +57,11 @@ TEMPLATE = r"""<!doctype html>
     --series-3: #199e70;
     --series-7: #9085e9;
     --series-8: #e66767;
+    --shadow-card: 0 1px 2px rgba(0,0,0,0.32), 0 4px 16px rgba(0,0,0,0.28);
   }
 }
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body {
   margin: 0;
   background: var(--page);
@@ -56,26 +70,47 @@ body {
   font-size: 14px;
   line-height: 1.45;
 }
-.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 20px 60px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: var(--sp-5) 20px 60px; }
+
+/* sticky top nav */
+.topnav {
+  position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--page) 86%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.topnav-inner {
+  max-width: 1180px; margin: 0 auto; padding: 12px 20px;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.brand { font-weight: 700; font-size: 14px; letter-spacing: -0.01em; }
+.topnav-links { display: flex; gap: 2px; }
+.topnav-links a {
+  color: var(--text-secondary); text-decoration: none; font-size: 12.5px;
+  font-weight: 500; padding: 7px 12px; border-radius: 8px; transition: background 0.12s, color 0.12s;
+}
+.topnav-links a:hover { color: var(--text-primary); background: rgba(127,127,127,0.10); }
+@media (max-width: 700px) { .topnav-links { display: none; } }
 
 /* header */
 header.hero {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 20px 24px;
-  margin-bottom: 18px;
+  box-shadow: var(--shadow-card);
+  border-radius: 16px;
+  padding: var(--sp-5) var(--sp-6);
+  margin: var(--sp-5) 0 var(--sp-6);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--sp-4);
 }
 .hero-race { min-width: 240px; }
-.hero-race .name { font-size: 15px; color: var(--text-secondary); }
-.hero-race .date { font-size: 13px; color: var(--text-muted); }
-.hero-countdown { display: flex; align-items: baseline; gap: 8px; }
-.hero-countdown .num { font-size: 44px; font-weight: 700; letter-spacing: -0.02em; }
+.hero-race .name { font-size: 15px; color: var(--text-secondary); font-weight: 600; }
+.hero-race .date { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.hero-countdown { display: flex; align-items: baseline; gap: 10px; }
+.hero-countdown .num { font-size: 56px; font-weight: 800; letter-spacing: -0.03em; }
 .hero-countdown .unit { font-size: 14px; color: var(--text-secondary); }
 .hero-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 .unit-toggle {
@@ -88,45 +123,56 @@ header.hero {
 .unit-toggle button.active { background: var(--series-1); color: white; }
 
 /* page sections */
-.section { margin-bottom: 32px; }
+.section { margin-bottom: var(--sp-7); }
 .section-head {
-  display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px;
-  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+  position: relative;
+  display: flex; align-items: center; gap: 10px; margin-bottom: var(--sp-4);
+  padding: 2px 0 var(--sp-2) 16px; border-bottom: 1px solid var(--border);
 }
-.section-head h2 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+.section-head::before {
+  content: ""; position: absolute; left: 0; top: 2px; bottom: 12px;
+  width: 3px; border-radius: 2px; background: var(--accent, var(--text-muted));
+}
+.section-head.acc-fitness  { --accent: var(--series-1); }
+.section-head.acc-plan     { --accent: var(--series-7); }
+.section-head.acc-effort   { --accent: var(--series-2); }
+.section-head.acc-wellness { --accent: var(--series-3); }
+.section-head.acc-runs     { --accent: var(--text-muted); }
+.section-head h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; font-weight: 700; }
 .section-head .section-note { font-size: 12px; color: var(--text-muted); }
 
 /* stat tiles */
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
 .tile {
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+  background: var(--surface-1); border: 1px solid var(--border); box-shadow: var(--shadow-card);
+  border-radius: 14px; padding: var(--sp-3) var(--sp-4);
 }
-.tile .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.tile .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+.tile .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+.tile .value { font-size: 30px; font-weight: 800; margin-top: 6px; letter-spacing: -0.02em; }
 .tile .value .u { font-size: 12px; font-weight: 400; color: var(--text-secondary); margin-left: 3px; }
 /* Fixed-height wrapper is required: Chart.js (responsive + maintainAspectRatio:
    false) sizes the canvas from its immediate parent's box via ResizeObserver,
    not from CSS on the canvas itself, so the canvas needs a positioned parent
    with a real height rather than a height rule on the canvas element. */
-.spark-wrap { position: relative; height: 40px; margin-top: 8px; }
+.spark-wrap { position: relative; height: 40px; margin-top: 10px; }
 .spark-wrap canvas { width: 100% !important; height: 100% !important; }
 
 /* predictions */
-.predictions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.pred-tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
-.pred-tile .dist { font-size: 12px; color: var(--text-muted); }
-.pred-tile .time { font-size: 20px; font-weight: 700; margin-top: 2px; }
-.pred-tile .pb { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.predictions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.pred-tile { background: var(--surface-1); border: 1px solid var(--border); box-shadow: var(--shadow-card); border-radius: 14px; padding: var(--sp-3) var(--sp-4); }
+.pred-tile .dist { font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+.pred-tile .time { font-size: 24px; font-weight: 800; margin-top: 4px; letter-spacing: -0.02em; }
+.pred-tile .pb { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
 
 /* cards */
 .card {
-  background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px;
-  padding: 18px 20px; margin-bottom: 18px;
+  background: var(--surface-1); border: 1px solid var(--border); box-shadow: var(--shadow-card);
+  border-radius: 16px; padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-3);
 }
-.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.card-head h3 { margin: 0; font-size: 14px; }
+.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: var(--sp-2); }
+.card-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
 .card-note { font-size: 12px; color: var(--text-muted); margin-top: 3px; max-width: 62ch; }
-.card-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.card-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
 @media (max-width: 860px) { .card-grid2 { grid-template-columns: 1fr; } }
 .chart-box { position: relative; height: 260px; }
 .chart-box.small { height: 180px; }
@@ -152,6 +198,12 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
 .badge-moderate { background: color-mix(in srgb, var(--warning) 22%, transparent); color: #8a5a00; }
 .badge-hard { background: color-mix(in srgb, var(--critical) 18%, transparent); color: var(--critical); }
 .badge-unknown { background: rgba(127,127,127,0.15); color: var(--text-muted); }
+/* plan phases are an identity, not a good/bad status -- distinct badge set,
+   reusing the categorical chart slots rather than the good/warning/critical ramp */
+.badge-phase-base  { background: color-mix(in srgb, var(--series-1) 16%, transparent); color: var(--series-1); }
+.badge-phase-build { background: color-mix(in srgb, var(--series-2) 16%, transparent); color: var(--series-2); }
+.badge-phase-peak  { background: color-mix(in srgb, var(--series-7) 16%, transparent); color: var(--series-7); }
+.badge-phase-taper { background: color-mix(in srgb, var(--series-3) 16%, transparent); color: var(--series-3); }
 @media (prefers-color-scheme: dark) {
   .badge-moderate { color: var(--warning); }
 }
@@ -160,14 +212,44 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
   background: color-mix(in srgb, var(--warning) 12%, var(--surface-1));
   border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
   border-radius: 12px; padding: 12px 16px; font-size: 12.5px; color: var(--text-secondary);
-  margin-bottom: 18px;
+  margin-bottom: var(--sp-4);
 }
+.note-banner.small { padding: 8px 14px; font-size: 11.5px; margin-bottom: var(--sp-3); }
 .legend-row { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--text-secondary); margin-top: 8px; }
 .legend-row .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
-.footer-note { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 24px; }
+.footer-note { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: var(--sp-6); }
+
+/* intensity-minutes meter */
+.meter-track {
+  position: relative; height: 14px; border-radius: 999px; overflow: hidden;
+  background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1));
+  border: 1px solid var(--border);
+}
+.meter-fill { position: absolute; top: 0; bottom: 0; }
+.meter-fill.moderate { background: color-mix(in srgb, var(--series-1) 45%, var(--surface-1)); }
+.meter-fill.vigorous { background: var(--series-1); }
+.meter-goal-tick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text-primary); opacity: 0.55; }
+.meter-value { font-size: 12.5px; color: var(--text-secondary); margin-top: var(--sp-2); }
+.meter-value b { color: var(--text-primary); font-weight: 800; font-size: 15px; }
+.fitness-age-value { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
+.fitness-age-value .u { font-size: 12px; font-weight: 400; color: var(--text-secondary); margin-left: 3px; }
 </style>
 </head>
 <body>
+
+<nav class="topnav">
+  <div class="topnav-inner">
+    <span class="brand">Training Dashboard</span>
+    <div class="topnav-links">
+      <a href="#section-fitness">Fitness</a>
+      <a href="#section-plan">Plan</a>
+      <a href="#section-effort">Effort</a>
+      <a href="#section-wellness">Wellness</a>
+      <a href="#section-runs">Runs</a>
+    </div>
+  </div>
+</nav>
+
 <div class="wrap">
 
   <header class="hero">
@@ -193,7 +275,7 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
   </section>
 
   <section class="section" id="section-fitness">
-    <div class="section-head"><h2>Fitness &amp; training load</h2></div>
+    <div class="section-head acc-fitness"><h2>Fitness &amp; training load</h2></div>
     <div class="card">
       <div class="card-head">
         <div>
@@ -218,8 +300,24 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
     </div>
   </section>
 
+  <section class="section" id="section-plan">
+    <div class="section-head acc-plan"><h2>Plan</h2><span class="section-note">Base &rarr; build &rarr; peak &rarr; taper, generated from your recent mileage &amp; fitness</span></div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h3>Target vs. actual weekly volume</h3>
+          <div class="card-note">Generated once from your fitness/mileage trend, then kept fixed &mdash; edit <code>training_plan_config.json</code> by hand and it won't be overwritten on refresh (run with <code>--regen-plan</code> to force a fresh plan).</div>
+        </div>
+      </div>
+      <div class="chart-box"><canvas id="chart-plan"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table class="data-table visible" id="table-plan"></table></div>
+    </div>
+  </section>
+
   <section class="section" id="section-effort">
-    <div class="section-head"><h2>Effort</h2></div>
+    <div class="section-head acc-effort"><h2>Effort</h2></div>
     <div class="card">
       <div class="card-head">
         <div>
@@ -260,8 +358,27 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
     </div>
   </section>
 
-  <section class="section" id="section-recovery">
-    <div class="section-head"><h2>Recovery</h2></div>
+  <section class="section" id="section-wellness">
+    <div class="section-head acc-wellness"><h2>Wellness</h2></div>
+    <div class="note-banner small" id="floors-note" style="display:none;"></div>
+    <div class="card">
+      <div class="card-head">
+        <div><h3>Steps</h3><div class="card-note">Daily step count.</div></div>
+        <button class="table-btn" data-toggle="table-steps">Table</button>
+      </div>
+      <div class="chart-box small"><canvas id="chart-steps"></canvas></div>
+      <div class="table-wrap"><table class="data-table" id="table-steps"></table></div>
+    </div>
+    <div class="card-grid2">
+      <div class="card">
+        <div class="card-head"><div><h3>Fitness Age</h3><div class="card-note">Garmin's estimate vs. your chronological age &mdash; a real Garmin metric, not derived.</div></div></div>
+        <div id="fitness-age-block"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div><h3>Intensity minutes</h3><div class="card-note">Moderate + vigorous minutes this week vs. your weekly goal.</div></div></div>
+        <div id="intensity-meter"></div>
+      </div>
+    </div>
     <div class="card-grid2">
       <div class="card">
         <div class="card-head">
@@ -301,7 +418,7 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
   </section>
 
   <section class="section" id="section-runs">
-    <div class="section-head"><h2>Recent runs</h2><span class="section-note">Last <span id="runs-days-n"></span> days</span></div>
+    <div class="section-head acc-runs"><h2>Recent runs</h2><span class="section-note">Last <span id="runs-days-n"></span> days</span></div>
     <div class="card">
       <div class="table-wrap"><table class="data-table visible" id="table-runs"></table></div>
     </div>
@@ -347,6 +464,16 @@ function css(varName) { return getComputedStyle(document.documentElement).getPro
 function effortBadge(effort, hardPct) {
   const cls = { easy: "badge-easy", moderate: "badge-moderate", hard: "badge-hard" }[effort] || "badge-unknown";
   const label = effort ? effort.charAt(0).toUpperCase() + effort.slice(1) : "Unknown";
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+function phaseBadge(phase) {
+  const cls = { base: "badge-phase-base", build: "badge-phase-build", peak: "badge-phase-peak", taper: "badge-phase-taper" }[phase] || "badge-unknown";
+  const label = phase ? phase.charAt(0).toUpperCase() + phase.slice(1) : "–";
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+function statusBadge(status) {
+  const cls = { hit: "badge-easy", missed: "badge-hard", upcoming: "badge-unknown", no_data: "badge-unknown" }[status] || "badge-unknown";
+  const label = { hit: "Hit", missed: "Missed", upcoming: "Upcoming", no_data: "No data" }[status] || status;
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
@@ -445,8 +572,8 @@ function renderStatTiles() {
     { label: "Form (TSB, est.)", value: t.form, unit: "", spark: DATA.training_load.map(p => p.tsb), color: "var(--series-7)", id: "spark-form" },
     { label: "7-day volume", value: null, unit: "", spark: DATA.weekly_mileage.map(w => w.km), color: "var(--series-3)", id: "spark-volume", custom: fmtDist(t.week_km) },
     { label: "VO₂ max", value: t.vo2max ?? "–", unit: "", spark: DATA.vo2max.trend.map(p => p.value), color: "var(--series-1)", id: "spark-vo2" },
-    { label: "Resting HR", value: t.resting_hr ?? "–", unit: "bpm", spark: DATA.recovery.rhr.map(p => p.value), color: "var(--series-2)", id: "spark-rhr" },
-    { label: "Avg stress", value: t.avg_stress ?? "–", unit: "", spark: DATA.recovery.stress.map(p => p.avg), color: "var(--series-8)", id: "spark-stress" },
+    { label: "Resting HR", value: t.resting_hr ?? "–", unit: "bpm", spark: DATA.wellness.rhr.map(p => p.value), color: "var(--series-2)", id: "spark-rhr" },
+    { label: "Avg stress", value: t.avg_stress ?? "–", unit: "", spark: DATA.wellness.stress.map(p => p.avg), color: "var(--series-8)", id: "spark-stress" },
   ];
   el.innerHTML = "";
   tiles.forEach(tile => {
@@ -516,6 +643,46 @@ function renderMileageChart() {
   buildTable(document.getElementById("table-mileage"),
     [{ label: "Week of", render: r => fmtDate(r.week_start) }, { label: "Distance", render: r => fmtDist(r.km) }, { label: "Runs", render: r => r.runs }],
     rows);
+}
+
+/* ---------- plan section ---------- */
+function renderPlanChart() {
+  destroyChart("plan");
+  const rows = DATA.plan.weeks;
+  const grid = baseGridOptions();
+  const target = rows.map(r => UNIT === "km" ? r.target_km : r.target_km * 0.621371);
+  const actual = rows.map(r => (r.actual_km === null || r.actual_km === undefined) ? null : (UNIT === "km" ? r.actual_km : r.actual_km * 0.621371));
+  charts.plan = new Chart(document.getElementById("chart-plan"), {
+    data: {
+      labels: rows.map(r => "W" + r.week_num),
+      datasets: [
+        { type: "bar", label: "Target " + UNIT, data: target, backgroundColor: css("--series-7"), borderRadius: 4, maxBarThickness: 22 },
+        { type: "line", label: "Actual " + UNIT, data: actual, borderColor: css("--series-2"), backgroundColor: css("--series-2"), pointRadius: 4, borderWidth: 2, spanGaps: false },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: css("--text-secondary"), boxWidth: 10, font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { ...grid.ticks, maxTicksLimit: 14 }, grid: { display: false }, border: grid.border },
+        y: { ticks: grid.ticks, grid: grid.grid, border: grid.border, title: { display: true, text: UNIT, color: css("--text-muted") } },
+      },
+    },
+  });
+}
+
+function renderPlanTable() {
+  buildTable(document.getElementById("table-plan"),
+    [
+      { label: "Week", render: r => r.week_num },
+      { label: "Week of", render: r => fmtDate(r.week_start) },
+      { label: "Phase", render: r => phaseBadge(r.phase) },
+      { label: "Target", render: r => fmtDist(r.target_km) },
+      { label: "Actual", render: r => (r.actual_km === null || r.actual_km === undefined) ? "–" : fmtDist(r.actual_km) },
+      { label: "Status", render: r => statusBadge(r.status) },
+      { label: "Key workout", render: r => r.key_workout },
+    ],
+    DATA.plan.weeks);
 }
 
 /* ---------- effort tab ---------- */
@@ -612,10 +779,73 @@ function renderDecouplingChart() {
     runs);
 }
 
-/* ---------- recovery tab ---------- */
+/* ---------- wellness tab ---------- */
+function renderFloorsNote() {
+  const el = document.getElementById("floors-note");
+  if (!DATA.wellness.floors_available) {
+    el.textContent = "Floors climbed isn't tracked on this device (no barometric altimeter) -- not shown.";
+    el.style.display = "block";
+  } else {
+    el.style.display = "none";
+  }
+}
+
+function renderStepsChart() {
+  destroyChart("steps");
+  const rows = DATA.wellness.steps;
+  const grid = baseGridOptions();
+  charts.steps = new Chart(document.getElementById("chart-steps"), {
+    type: "bar",
+    data: { labels: rows.map(r => r.date), datasets: [{ label: "Steps", data: rows.map(r => r.value), backgroundColor: css("--series-3"), borderRadius: 4, maxBarThickness: 16 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { ...grid.ticks, maxTicksLimit: 10, callback: (v, i) => fmtDate(rows[i]?.date) }, grid: { display: false }, border: grid.border },
+        y: { ticks: grid.ticks, grid: grid.grid, border: grid.border },
+      },
+    },
+  });
+  buildTable(document.getElementById("table-steps"),
+    [{ label: "Date", render: r => fmtDate(r.date) }, { label: "Steps", render: r => r.value.toLocaleString() }],
+    rows);
+}
+
+function renderIntensityMeter() {
+  const el = document.getElementById("intensity-meter");
+  const im = DATA.wellness.intensity_minutes;
+  if (!im) {
+    el.innerHTML = `<div class="card-note">No intensity-minutes data for today.</div>`;
+    return;
+  }
+  const scale = Math.max(im.weekly_total || 0, im.week_goal || 0, 1) * 1.05;
+  const modPct = Math.min(100, (im.weekly_moderate || 0) / scale * 100);
+  const vigPct = Math.min(100 - modPct, (im.weekly_vigorous || 0) / scale * 100);
+  const goalPct = im.week_goal ? Math.min(100, im.week_goal / scale * 100) : null;
+  el.innerHTML = `
+    <div class="meter-track">
+      <div class="meter-fill moderate" style="width:${modPct}%"></div>
+      <div class="meter-fill vigorous" style="left:${modPct}%;width:${vigPct}%"></div>
+      ${goalPct !== null ? `<div class="meter-goal-tick" style="left:${goalPct}%"></div>` : ""}
+    </div>
+    <div class="meter-value"><b>${im.weekly_total ?? "–"}</b> / ${im.week_goal ?? "–"} min this week
+      <span style="color:var(--text-muted)"> (${im.weekly_moderate ?? 0} moderate + ${im.weekly_vigorous ?? 0} vigorous)</span></div>`;
+}
+
+function renderFitnessAge() {
+  const el = document.getElementById("fitness-age-block");
+  const fa = DATA.wellness.fitness_age;
+  if (!fa) {
+    el.innerHTML = `<div class="card-note">No Fitness Age data available.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="fitness-age-value">${fa.fitness_age}<span class="u">yrs</span></div>
+    <div class="card-note" style="margin-top:8px;">Chronological age ${fa.chronological_age ?? "–"} &middot; achievable ${fa.achievable_fitness_age ?? "–"}</div>`;
+}
+
 function renderRhrChart() {
   destroyChart("rhr");
-  const rows = DATA.recovery.rhr;
+  const rows = DATA.wellness.rhr;
   const grid = baseGridOptions();
   charts.rhr = new Chart(document.getElementById("chart-rhr"), {
     type: "line",
@@ -642,7 +872,7 @@ function renderRhrChart() {
 
 function renderBatteryChart() {
   destroyChart("battery");
-  const rows = DATA.recovery.body_battery;
+  const rows = DATA.wellness.body_battery;
   const grid = baseGridOptions();
   charts.battery = new Chart(document.getElementById("chart-battery"), {
     type: "bar",
@@ -669,7 +899,7 @@ function renderBatteryChart() {
 
 function renderStressChart() {
   destroyChart("stress");
-  const rows = DATA.recovery.stress;
+  const rows = DATA.wellness.stress;
   const grid = baseGridOptions();
   charts.stress = new Chart(document.getElementById("chart-stress"), {
     type: "line",
@@ -743,10 +973,16 @@ function renderAll() {
   renderStatTiles();
   renderLoadChart();
   renderMileageChart();
+  renderPlanChart();
+  renderPlanTable();
   renderEffortSplit();
   renderScatterChart();
   renderEasyHrChart();
   renderDecouplingChart();
+  renderFloorsNote();
+  renderStepsChart();
+  renderIntensityMeter();
+  renderFitnessAge();
   renderRhrChart();
   renderBatteryChart();
   renderStressChart();
@@ -759,6 +995,8 @@ document.querySelectorAll(".unit-toggle button").forEach(btn => {
     UNIT = btn.dataset.unit;
     document.querySelectorAll(".unit-toggle button").forEach(b => b.classList.toggle("active", b === btn));
     renderMileageChart();
+    renderPlanChart();
+    renderPlanTable();
     renderScatterChart();
     renderRunsTable();
   });
