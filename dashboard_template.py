@@ -280,6 +280,16 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
 .modal-status.status-bad { background: color-mix(in srgb, var(--critical) 18%, transparent); color: var(--critical); }
 .modal-status.status-neutral { background: rgba(127,127,127,0.15); color: var(--text-muted); }
 @media (prefers-color-scheme: dark) { .modal-status.status-warn { color: var(--warning); } }
+
+/* heart rate zones */
+.hrzone-defs { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.hrzone-chip { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font-size: 11.5px; }
+.hrzone-chip .hz-head { display: flex; align-items: center; gap: 6px; font-weight: 700; margin-bottom: 3px; }
+.hrzone-chip .hz-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.hrzone-chip .hz-range { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.hrzone-chip .hz-purpose { color: var(--text-muted); margin-top: 3px; }
+.chart-box.tiny { height: 56px; }
+.chart-box.runs-hz { height: 280px; }
 </style>
 </head>
 <body>
@@ -373,6 +383,27 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
         </div>
       </div>
       <div id="effort-split" class="legend-row"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h3>Heart rate zone distribution</h3>
+          <div class="card-note">Last <span id="hrzone-days-n"></span> days, from Garmin's own per-run zone data (<span id="hrzone-source-note"></span>).</div>
+        </div>
+      </div>
+      <div class="hrzone-defs" id="hrzone-defs"></div>
+      <div class="note-banner small" id="hrzone-empty-note" style="display:none;"></div>
+      <div id="hrzone-agg-wrap">
+        <div class="chart-box tiny"><canvas id="chart-hrzone-agg"></canvas></div>
+      </div>
+    </div>
+    <div class="card" id="hrzone-runs-wrap">
+      <div class="card-head">
+        <div><h3>Zone breakdown per run</h3><div class="card-note">Each bar is one run, stacked to 100%.</div></div>
+        <button class="table-btn" data-toggle="table-hrzone-runs">Table</button>
+      </div>
+      <div class="chart-box runs-hz"><canvas id="chart-hrzone-runs"></canvas></div>
+      <div class="table-wrap"><table class="data-table" id="table-hrzone-runs"></table></div>
     </div>
     <div class="card-grid2">
       <div class="card">
@@ -641,6 +672,7 @@ function renderStatTiles() {
     { key: "vo2max", label: "VO₂ max", value: t.vo2max ?? "–", unit: "", spark: DATA.vo2max.trend.map(p => p.value), color: "var(--series-1)", id: "spark-vo2" },
     { key: "rhr", label: "Resting HR", value: t.resting_hr ?? "–", unit: "bpm", spark: DATA.wellness.rhr.map(p => p.value), color: "var(--series-2)", id: "spark-rhr" },
     { key: "stress", label: "Avg stress", value: t.avg_stress ?? "–", unit: "", spark: DATA.wellness.stress.map(p => p.avg), color: "var(--series-8)", id: "spark-stress" },
+    { key: "hrzones", label: "HR zone split (easy %)", value: null, unit: "", spark: DATA.hr_zones.runs.slice().reverse().map(r => r.zone_pct[0] + r.zone_pct[1]), color: "var(--good)", id: "spark-hrzones", custom: (DATA.hr_zones.aggregate.easy_pct ?? "–") + "%" },
   ];
   el.innerHTML = "";
   tiles.forEach(tile => {
@@ -849,6 +881,96 @@ function renderDecouplingChart() {
   });
   buildTable(document.getElementById("table-decoupling"),
     [{ label: "Date", render: r => fmtDate(r.date) }, { label: "Distance", render: r => fmtDist(r.distance_km) }, { label: "Decoupling", render: r => r.decoupling_pct + "%" }],
+    runs);
+}
+
+function hrZoneColor(i) {
+  const stops = [
+    `color-mix(in srgb, ${css("--good")} 55%, ${css("--surface-1")})`,
+    css("--good"), css("--warning"), css("--series-2"), css("--critical"),
+  ];
+  return stops[i];
+}
+
+function renderHrZoneDefs() {
+  document.getElementById("hrzone-days-n").textContent = DATA.recent_runs_days;
+  document.getElementById("hrzone-source-note").textContent = DATA.hr_zones.boundary_source || "";
+  const el = document.getElementById("hrzone-defs");
+  el.innerHTML = "";
+  DATA.hr_zones.zone_defs.forEach((z, i) => {
+    const range = (z.high !== null && z.high !== undefined) ? `${z.low}–${z.high} bpm` : `${z.low}+ bpm`;
+    const div = document.createElement("div");
+    div.className = "hrzone-chip";
+    div.innerHTML = `<div class="hz-head"><span class="hz-dot" style="background:${hrZoneColor(i)}"></span>${z.label}</div>
+      <div class="hz-range">${range}</div>
+      <div class="hz-purpose">${z.purpose}</div>`;
+    el.appendChild(div);
+  });
+}
+
+function renderHrZoneEmptyNote() {
+  const el = document.getElementById("hrzone-empty-note");
+  const hasData = DATA.hr_zones.runs.length > 0;
+  el.style.display = hasData ? "none" : "block";
+  if (!hasData) el.textContent = `No per-run heart-rate zone data available yet for the last ${DATA.recent_runs_days} days.`;
+  document.getElementById("hrzone-agg-wrap").style.display = hasData ? "" : "none";
+  document.getElementById("hrzone-runs-wrap").style.display = hasData ? "" : "none";
+}
+
+function renderHrZoneAggChart() {
+  destroyChart("hrzoneAgg");
+  if (!DATA.hr_zones.runs.length) return;
+  const agg = DATA.hr_zones.aggregate;
+  const defs = DATA.hr_zones.zone_defs;
+  const grid = baseGridOptions();
+  charts.hrzoneAgg = new Chart(document.getElementById("chart-hrzone-agg"), {
+    type: "bar",
+    data: { labels: ["All runs"], datasets: defs.map((z, i) => ({ label: z.label, data: [agg.zone_pct[i]], backgroundColor: hrZoneColor(i), borderRadius: 3 })) },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { color: css("--text-secondary"), boxWidth: 10, font: { size: 10.5 } } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.x}%` } },
+      },
+      scales: {
+        x: { stacked: true, min: 0, max: 100, ticks: { ...grid.ticks, callback: v => v + "%" }, grid: grid.grid, border: grid.border },
+        y: { stacked: true, ticks: { display: false }, grid: { display: false }, border: grid.border },
+      },
+    },
+  });
+}
+
+function renderHrZoneRunsChart() {
+  destroyChart("hrzoneRuns");
+  const runs = DATA.hr_zones.runs;
+  const defs = DATA.hr_zones.zone_defs;
+  if (!runs.length) return;
+  const grid = baseGridOptions();
+  charts.hrzoneRuns = new Chart(document.getElementById("chart-hrzone-runs"), {
+    type: "bar",
+    data: {
+      labels: runs.map(r => fmtDate(r.date)),
+      datasets: defs.map((z, i) => ({ label: z.label, data: runs.map(r => r.zone_pct[i]), backgroundColor: hrZoneColor(i), borderRadius: 2, maxBarThickness: 20 })),
+    },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { color: css("--text-secondary"), boxWidth: 10, font: { size: 10.5 } } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.x}%` } },
+      },
+      scales: {
+        x: { stacked: true, min: 0, max: 100, ticks: { ...grid.ticks, callback: v => v + "%" }, grid: grid.grid, border: grid.border },
+        y: { stacked: true, ticks: grid.ticks, grid: { display: false }, border: grid.border },
+      },
+    },
+  });
+  buildTable(document.getElementById("table-hrzone-runs"),
+    [
+      { label: "Date", render: r => fmtDate(r.date) },
+      { label: "Run", render: r => r.name || "–" },
+      { label: "Distance", render: r => fmtDist(r.distance_km) },
+      ...defs.map((z, i) => ({ label: "Z" + (i + 1) + " %", render: r => r.zone_pct[i] + "%" })),
+    ],
     runs);
 }
 
@@ -1141,6 +1263,7 @@ const METRIC_META = {
   vo2max: { title: "VO₂ max", subtitle: () => (DATA.stat_tiles.vo2max ?? "–") + " mL/kg/min" },
   rhr: { title: "Resting Heart Rate", subtitle: () => (DATA.stat_tiles.resting_hr ?? "–") + " bpm" },
   stress: { title: "Avg Stress", subtitle: () => (DATA.stat_tiles.avg_stress ?? "–") + " / 100" },
+  hrzones: { title: "Heart Rate Zone Split", subtitle: () => (DATA.hr_zones.aggregate.easy_pct ?? "–") + "% easy (Z1-Z2), last " + DATA.recent_runs_days + " days" },
   "pred-5k": { title: "5K Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["5k_s"]) },
   "pred-10k": { title: "10K Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["10k_s"]) },
   "pred-half": { title: "Half Marathon Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["half_s"]) },
@@ -1218,6 +1341,27 @@ function renderModalChart(key) {
           ],
         },
         options: modalLineOptions(rows, r => r.date),
+      };
+    }
+  } else if (key === "hrzones") {
+    const runs = DATA.hr_zones.runs;
+    const defs = DATA.hr_zones.zone_defs;
+    if (runs.length) {
+      const grid = baseGridOptions();
+      cfg = {
+        type: "bar",
+        data: {
+          labels: runs.map(r => fmtDate(r.date)),
+          datasets: defs.map((z, i) => ({ label: z.label, data: runs.map(r => r.zone_pct[i]), backgroundColor: hrZoneColor(i), borderRadius: 2 })),
+        },
+        options: {
+          indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { position: "bottom", labels: { color: css("--text-secondary"), boxWidth: 10, font: { size: 10.5 } } } },
+          scales: {
+            x: { stacked: true, min: 0, max: 100, ticks: { ...grid.ticks, callback: v => v + "%" }, grid: grid.grid, border: grid.border },
+            y: { stacked: true, ticks: grid.ticks, grid: { display: false }, border: grid.border },
+          },
+        },
       };
     }
   } else if (key.startsWith("pred-")) {
@@ -1440,6 +1584,44 @@ function metricContent(key) {
       </div>`;
   }
 
+  if (key === "hrzones") {
+    const agg = DATA.hr_zones.aggregate;
+    if (agg.easy_pct === null || agg.easy_pct === undefined) {
+      return `<div class="modal-section"><p>Not enough per-run heart-rate zone data yet for the last ${DATA.recent_runs_days} days.</p></div>`;
+    }
+    const easy = agg.easy_pct, tempo = agg.tempo_pct, hard = agg.hard_pct;
+    let pill, verdict;
+    if (easy >= 78) {
+      pill = statusPill("good", "on target");
+      verdict = `Your easy/hard split (${easy}% easy) is right around the 80/20 guideline &mdash; keep doing what you're doing.`;
+    } else if (easy >= 65) {
+      pill = statusPill("warn", "slightly off");
+      verdict = `At ${easy}% easy, you're a bit below the 80/20 target. The most common cause is "easy" runs drifting into Z3 &mdash; ${tempo}% of your time is in Z3 (Tempo) right now, which is high if most of those runs were meant to be easy.`;
+    } else {
+      pill = statusPill("bad", "too much hard running");
+      verdict = `At only ${easy}% easy, you're well below the 80/20 target, with ${hard}% of your time in Z4-Z5. That much hard-running load without a large easy base raises injury and burnout risk, especially heading into a marathon build.`;
+    }
+    return `
+      <div class="modal-section">
+        <h4>The 80/20 rule</h4>
+        <p>Polarized-training research (Seiler et al.) consistently finds that runners who spend roughly <b>80% of training time easy</b> (Z1&ndash;Z2, conversational effort) and <b>~20% hard</b> (Z3&ndash;Z5, ideally concentrated at Z4&ndash;Z5 rather than a moderate Z3 grey zone) improve faster and get injured less than those parked at a comfortably-hard middle intensity most days. Z3 is the zone runners drift into by accident &mdash; it feels productive but is often too hard to recover from and too easy to build real fitness.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Your current split</h4>
+        ${pill}
+        <p>Last ${DATA.recent_runs_days} days: <b>${easy}%</b> easy (Z1&ndash;Z2), <b>${tempo}%</b> tempo (Z3), <b>${hard}%</b> hard (Z4&ndash;Z5).</p>
+        <p>${verdict}</p>
+      </div>
+      <div class="modal-section">
+        <h4>What to adjust</h4>
+        <ul>
+          <li>If Z3 is high: deliberately slow down easy runs &mdash; if you can't hold a conversation, you're not in Z2. It should feel almost too easy.</li>
+          <li>If Z4&ndash;Z5 is high without dedicated interval sessions: check whether "easy" days are creeping into threshold effort, or whether recovery runs are being pushed too hard.</li>
+          <li>Keep 1&ndash;2 sessions a week genuinely hard (intervals/tempo) and let everything else be genuinely easy &mdash; avoid the moderate middle ground on non-workout days.</li>
+        </ul>
+      </div>`;
+  }
+
   if (key.startsWith("pred-")) {
     const meta = { "pred-5k": ["5k_s", "5K", "5K"], "pred-10k": ["10k_s", "10K", "10K"], "pred-half": ["half_s", "Half Marathon", "half marathon"], "pred-marathon": ["marathon_s", "Marathon", "marathon"] }[key];
     const [field, pbKey, label] = meta;
@@ -1520,6 +1702,10 @@ function renderAll() {
   renderPlanChart();
   renderPlanTable();
   renderEffortSplit();
+  renderHrZoneDefs();
+  renderHrZoneEmptyNote();
+  renderHrZoneAggChart();
+  renderHrZoneRunsChart();
   renderScatterChart();
   renderEasyHrChart();
   renderDecouplingChart();

@@ -77,6 +77,15 @@ OUTPUT_PATH = SCRIPT_DIR / "index.html"
 OG_IMAGE_PATH = SCRIPT_DIR / "og-image.png"
 PLAN_CONFIG_PATH = SCRIPT_DIR / "training_plan_config.json"
 
+HR_ZONE_LABELS = ["Z1 Recovery", "Z2 Easy/Aerobic", "Z3 Tempo", "Z4 Threshold", "Z5 VO2max/Anaerobic"]
+HR_ZONE_PURPOSE = [
+    "very light effort -- active recovery, warm-up/cool-down",
+    "builds aerobic base -- should make up roughly 70-80% of weekly running volume",
+    "moderately hard, comfortably-uncomfortable -- easy to drift into by accident on 'easy' days",
+    "lactate-threshold effort, sustainable for ~20-40min continuous -- classic tempo/threshold workouts",
+    "maximal aerobic power / anaerobic capacity -- short hard intervals only",
+]
+
 RUNNING_TYPE_KEYS = {
     "running", "trail_running", "treadmill_running", "track_running",
     "street_running", "ultra_run", "indoor_running", "virtual_run",
@@ -138,7 +147,7 @@ def load_cache() -> dict:
             return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
-    return {"daily_stats": {}, "splits": {}, "predictions_history": []}
+    return {"daily_stats": {}, "splits": {}, "predictions_history": [], "hr_zones": {}}
 
 
 def save_cache(cache: dict) -> None:
@@ -203,6 +212,31 @@ def fetch_splits_cached(client, activities: list[dict], cache: dict) -> None:
         fetched += 1
     if fetched:
         print(f"Fetched splits for {fetched} new activities.")
+
+
+def fetch_hr_zones_cached(client, running_activities: list[dict], cache: dict) -> None:
+    """Populate cache['hr_zones'][activity_id] with Garmin's own per-activity
+    HR time-in-zone breakdown (hrTimeInZones endpoint): zoneLowBoundary (bpm,
+    the account's actual configured zones) + secsInZone per zone 1-5. This is
+    Garmin's own computation, not a recalculation from laps."""
+    zones_cache = cache.setdefault("hr_zones", {})
+    fetched = 0
+    for a in running_activities:
+        key = str(a["id"])
+        if key in zones_cache:
+            continue
+        try:
+            raw = client.get_activity_hr_in_timezones(a["id"]) or []
+        except Exception:
+            zones_cache[key] = []
+            continue
+        zones_cache[key] = [
+            {"zone": z.get("zoneNumber"), "secs": z.get("secsInZone") or 0.0, "low": z.get("zoneLowBoundary")}
+            for z in raw if z.get("zoneNumber")
+        ]
+        fetched += 1
+    if fetched:
+        print(f"Fetched HR zone breakdown for {fetched} new activities.")
 
 
 def fetch_daily_stats_cached(client, days: list[str], cache: dict) -> None:
@@ -607,6 +641,81 @@ def build_runs(activities: list[dict], splits_cache: dict, threshold_hr: float, 
     return runs
 
 
+def compute_hr_zones_summary(activities: list[dict], cache: dict, today: date, window_days: int, max_hr: float) -> dict:
+    """Aggregate Garmin's per-activity hrTimeInZones data (cache['hr_zones'])
+    over the last `window_days`. Falls back to a standard 50/60/70/80/90%-of-
+    max-HR model only if no per-activity zone data is available at all."""
+    zones_cache = cache.get("hr_zones", {})
+    window_start = today - timedelta(days=window_days)
+
+    run_rows = []
+    agg_secs = [0.0] * 5
+    latest_boundaries = None
+
+    for a in activities:  # activities is sorted ascending by date
+        if not a["is_running"] or a["distance_m"] < 500:
+            continue
+        d_str = (a["start_time_local"] or "")[:10]
+        try:
+            d = date.fromisoformat(d_str)
+        except ValueError:
+            continue
+        if d < window_start:
+            continue
+        zdata = zones_cache.get(str(a["id"])) or []
+        if not zdata:
+            continue
+        secs = [0.0] * 5
+        for z in zdata:
+            idx = (z.get("zone") or 0) - 1
+            if 0 <= idx < 5:
+                secs[idx] = z.get("secs") or 0.0
+        total = sum(secs)
+        if total <= 0:
+            continue
+        run_rows.append({
+            "id": a["id"], "date": d_str, "name": a["name"],
+            "distance_km": round(a["distance_m"] / 1000.0, 2),
+            "zone_secs": [round(s, 1) for s in secs],
+            "zone_pct": [round(s / total * 100, 1) for s in secs],
+        })
+        for i in range(5):
+            agg_secs[i] += secs[i]
+        boundaries = [z.get("low") for z in sorted(zdata, key=lambda z: z.get("zone") or 0)]
+        if len(boundaries) == 5 and all(b is not None for b in boundaries):
+            latest_boundaries = boundaries  # ascending date order -> ends up most recent
+
+    if latest_boundaries:
+        lows = latest_boundaries
+        boundary_source = "Garmin-computed zones from your account (most recent zone-tagged run)"
+    else:
+        lows = [round(max_hr * p) for p in (0.50, 0.60, 0.70, 0.80, 0.90)]
+        boundary_source = "estimated using the standard 50/60/70/80/90% of max-HR model (no per-activity zone data available yet)"
+
+    zone_defs = [
+        {"zone": i + 1, "label": HR_ZONE_LABELS[i], "low": lows[i],
+         "high": (lows[i + 1] - 1) if i < 4 else None, "purpose": HR_ZONE_PURPOSE[i]}
+        for i in range(5)
+    ]
+
+    agg_total = sum(agg_secs)
+    agg_pct = [round(s / agg_total * 100, 1) for s in agg_secs] if agg_total > 0 else [0.0] * 5
+
+    return {
+        "zone_defs": zone_defs,
+        "boundary_source": boundary_source,
+        "runs": sorted(run_rows, key=lambda r: r["date"], reverse=True),
+        "aggregate": {
+            "zone_secs": [round(s, 1) for s in agg_secs],
+            "zone_pct": agg_pct,
+            "easy_pct": round(agg_pct[0] + agg_pct[1], 1) if agg_total > 0 else None,
+            "tempo_pct": agg_pct[2] if agg_total > 0 else None,
+            "hard_pct": round(agg_pct[3] + agg_pct[4], 1) if agg_total > 0 else None,
+            "total_hours": round(agg_total / 3600, 1) if agg_total else 0,
+        },
+    }
+
+
 # --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
@@ -626,6 +735,15 @@ def main() -> None:
     print(f"Fetched {len(activities)} activities.")
 
     fetch_splits_cached(client, activities, cache)
+
+    hr_zone_window_start = today - timedelta(days=RECENT_RUNS_DAYS)
+    hr_zone_candidates = [
+        a for a in activities
+        if a["is_running"] and a["distance_m"] >= 500
+        and (a["start_time_local"] or "")[:10] >= hr_zone_window_start.isoformat()
+    ]
+    print(f"Fetching HR zone breakdown for the last {RECENT_RUNS_DAYS} days (cached incrementally)...")
+    fetch_hr_zones_cached(client, hr_zone_candidates, cache)
 
     recovery_start = today - timedelta(days=RECOVERY_DAYS - 1)
     recovery_days = [(recovery_start + timedelta(days=i)).isoformat() for i in range(RECOVERY_DAYS)]
@@ -680,6 +798,8 @@ def main() -> None:
 
     runs_window_start = today - timedelta(weeks=MILEAGE_WEEKS)
     runs = build_runs(activities, cache["splits"], threshold_hr, runs_window_start)
+
+    hr_zones = compute_hr_zones_summary(activities, cache, today, RECENT_RUNS_DAYS, max_hr)
 
     rhr_series = []
     stress_series = []
@@ -747,6 +867,7 @@ def main() -> None:
         },
         "runs": runs,
         "recent_runs_days": RECENT_RUNS_DAYS,
+        "hr_zones": hr_zones,
         "stat_tiles": {
             "fitness": latest_load.get("ctl", 0),
             "fatigue": latest_load.get("atl", 0),
