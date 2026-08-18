@@ -264,14 +264,23 @@ def fetch_daily_stats_cached(client, days: list[str], cache: dict) -> None:
         print(f"Fetched daily wellness stats for {fetched} day(s).")
 
 
-def fetch_body_battery(client, start_date: str, end_date: str) -> list[dict]:
+def fetch_body_battery(client, start_date: str, end_date: str) -> tuple[list[dict], float]:
     """Garmin's body-battery endpoint rejects date ranges above ~28 days
-    ("requested date range is too big"), so fetch in chunks and merge."""
+    ("requested date range is too big"), so fetch in chunks and merge.
+
+    Also extracts each day's last-recorded level ("level_end") from
+    bodyBatteryValuesArray, and tracks how many points/day were returned.
+    Checked against this account: consistently ~6 points/day (vs. the much
+    higher intraday resolution full HRV/sleep-tracking devices report), and
+    get_body_battery_events() returns nothing -- i.e. no sleep/activity event
+    attribution at all. That point count is surfaced to the UI as a concrete,
+    measured caveat rather than an assumption."""
     CHUNK_DAYS = 28
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
 
     out: list[dict] = []
+    point_counts: list[int] = []
     chunk_start = start
     while chunk_start <= end:
         chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS - 1), end)
@@ -280,13 +289,20 @@ def fetch_body_battery(client, start_date: str, end_date: str) -> list[dict]:
         except Exception as exc:
             print(f"WARNING: failed to fetch body battery for {chunk_start}..{chunk_end}: {exc}", file=sys.stderr)
             raw = []
-        out.extend(
-            {"date": d.get("date"), "charged": d.get("charged"), "drained": d.get("drained")}
-            for d in raw
-            if d.get("date")
-        )
+        for d in raw:
+            if not d.get("date"):
+                continue
+            values = d.get("bodyBatteryValuesArray") or []
+            point_counts.append(len(values))
+            level_end = values[-1][1] if values else None
+            out.append({
+                "date": d["date"], "charged": d.get("charged"), "drained": d.get("drained"),
+                "level_end": level_end,
+            })
         chunk_start = chunk_end + timedelta(days=1)
-    return out
+
+    avg_points_per_day = round(statistics.mean(point_counts), 1) if point_counts else 0.0
+    return out, avg_points_per_day
 
 
 def fetch_vo2max_trend(client, start_date: str, end_date: str) -> list[dict]:
@@ -751,7 +767,7 @@ def main() -> None:
     fetch_daily_stats_cached(client, recovery_days, cache)
 
     print("Fetching body battery...")
-    body_battery = fetch_body_battery(client, recovery_start.isoformat(), today.isoformat())
+    body_battery, bb_avg_points_per_day = fetch_body_battery(client, recovery_start.isoformat(), today.isoformat())
 
     print("Fetching VO2max trend...")
     vo2max_trend = fetch_vo2max_trend(
@@ -825,6 +841,16 @@ def main() -> None:
     latest_vo2 = vo2max_trend[-1]["value"] if vo2max_trend else profile.get("vo2max_running")
     latest_rhr = rhr_series[-1]["value"] if rhr_series else None
     latest_stress = stress_series[-1]["avg"] if stress_series else None
+    latest_bb_level = next(
+        (d["level_end"] for d in reversed(body_battery) if d.get("level_end") is not None), None
+    )
+    body_battery_note = (
+        f"Averaging ~{bb_avg_points_per_day:.0f} Body Battery readings/day over the last {RECOVERY_DAYS} days, "
+        "with no sleep/activity event breakdown available (checked via Garmin's event endpoint, which returns "
+        "nothing for this account) -- a fully HRV- and sleep-tracking device typically reports far more granular "
+        "data. Your Forerunner 45/45S/55 don't track HRV or sleep, so this number is computed from a reduced "
+        "input set (mainly stress + activity/heart rate). Treat it as a rough signal, not a precise recovery score."
+    )
 
     # ---- training plan: generated once, then never silently overwritten ----
     plan_config = None if REGEN_PLAN else load_plan_config(PLAN_CONFIG_PATH)
@@ -855,6 +881,7 @@ def main() -> None:
             "rhr": rhr_series,
             "stress": stress_series,
             "body_battery": body_battery,
+            "body_battery_note": body_battery_note,
             "steps": steps_series,
             "intensity_minutes": intensity_minutes,
             "fitness_age": fitness_age,
@@ -876,6 +903,7 @@ def main() -> None:
             "vo2max": latest_vo2,
             "resting_hr": latest_rhr,
             "avg_stress": latest_stress,
+            "body_battery": latest_bb_level,
         },
         "missing_data_note": (
             "Garmin's official training status (CTL/ATL/TSB), HRV, training readiness "

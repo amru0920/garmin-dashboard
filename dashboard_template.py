@@ -468,9 +468,10 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
       </div>
       <div class="card">
         <div class="card-head">
-          <div><h3>Body Battery</h3><div class="card-note">Daily charged vs. drained.</div></div>
+          <div><h3>Body Battery</h3><div class="card-note">Daily charged vs. drained, plus end-of-day level, last <span id="bb-days-n"></span> days.</div></div>
           <button class="table-btn" data-toggle="table-battery">Table</button>
         </div>
+        <div class="note-banner small" id="bb-degraded-note"></div>
         <div class="chart-box"><canvas id="chart-battery"></canvas></div>
         <div class="table-wrap"><table class="data-table" id="table-battery"></table></div>
       </div>
@@ -673,6 +674,7 @@ function renderStatTiles() {
     { key: "rhr", label: "Resting HR", value: t.resting_hr ?? "–", unit: "bpm", spark: DATA.wellness.rhr.map(p => p.value), color: "var(--series-2)", id: "spark-rhr" },
     { key: "stress", label: "Avg stress", value: t.avg_stress ?? "–", unit: "", spark: DATA.wellness.stress.map(p => p.avg), color: "var(--series-8)", id: "spark-stress" },
     { key: "hrzones", label: "HR zone split (easy %)", value: null, unit: "", spark: DATA.hr_zones.runs.slice().reverse().map(r => r.zone_pct[0] + r.zone_pct[1]), color: "var(--good)", id: "spark-hrzones", custom: (DATA.hr_zones.aggregate.easy_pct ?? "–") + "%" },
+    { key: "bodybattery", label: "Body Battery", value: t.body_battery ?? "–", unit: "/100", spark: DATA.wellness.body_battery.map(p => p.level_end), color: "var(--series-7)", id: "spark-bb" },
   ];
   el.innerHTML = "";
   tiles.forEach(tile => {
@@ -1065,17 +1067,22 @@ function renderRhrChart() {
     rows);
 }
 
+const BB_DISPLAY_DAYS = 28; // last 2-4 weeks, per the Body Battery card's own display window
+function renderBbDegradedNote() {
+  document.getElementById("bb-days-n").textContent = BB_DISPLAY_DAYS;
+  document.getElementById("bb-degraded-note").textContent = DATA.wellness.body_battery_note;
+}
 function renderBatteryChart() {
   destroyChart("battery");
-  const rows = DATA.wellness.body_battery;
+  const rows = DATA.wellness.body_battery.slice(-BB_DISPLAY_DAYS);
   const grid = baseGridOptions();
   charts.battery = new Chart(document.getElementById("chart-battery"), {
-    type: "bar",
     data: {
       labels: rows.map(r => r.date),
       datasets: [
-        { label: "Charged", data: rows.map(r => r.charged), backgroundColor: css("--series-1"), borderRadius: 3, maxBarThickness: 18 },
-        { label: "Drained", data: rows.map(r => -(r.drained || 0)), backgroundColor: css("--series-8"), borderRadius: 3, maxBarThickness: 18 },
+        { type: "bar", label: "Charged", data: rows.map(r => r.charged), backgroundColor: css("--series-1"), borderRadius: 3, maxBarThickness: 18 },
+        { type: "bar", label: "Drained", data: rows.map(r => -(r.drained || 0)), backgroundColor: css("--series-8"), borderRadius: 3, maxBarThickness: 18 },
+        { type: "line", label: "End-of-day level", data: rows.map(r => r.level_end), borderColor: css("--series-7"), backgroundColor: css("--series-7"), pointRadius: 2, borderWidth: 2, tension: 0.25, spanGaps: true },
       ],
     },
     options: {
@@ -1088,7 +1095,12 @@ function renderBatteryChart() {
     },
   });
   buildTable(document.getElementById("table-battery"),
-    [{ label: "Date", render: r => fmtDate(r.date) }, { label: "Charged", render: r => r.charged }, { label: "Drained", render: r => r.drained }],
+    [
+      { label: "Date", render: r => fmtDate(r.date) },
+      { label: "Charged", render: r => r.charged },
+      { label: "Drained", render: r => r.drained },
+      { label: "End-of-day level", render: r => r.level_end ?? "–" },
+    ],
     rows);
 }
 
@@ -1239,6 +1251,14 @@ function rhrBaselineVsRecent() {
   const avg = arr => arr.reduce((a, b) => a + b.value, 0) / arr.length;
   return { recent: avg(recent), baseline: rest.length ? avg(rest) : avg(recent) };
 }
+function bbTrend() {
+  const rows = DATA.wellness.body_battery.filter(r => r.level_end !== null && r.level_end !== undefined);
+  if (rows.length < 10) return null;
+  const recent = rows.slice(-7);
+  const prior = rows.slice(-14, -7);
+  const avg = arr => arr.reduce((a, b) => a + b.level_end, 0) / arr.length;
+  return { recent: avg(recent), prior: prior.length ? avg(prior) : avg(recent) };
+}
 function stressRecentVsPrior() {
   const rows = DATA.wellness.stress;
   if (rows.length < 10) return null;
@@ -1264,6 +1284,7 @@ const METRIC_META = {
   rhr: { title: "Resting Heart Rate", subtitle: () => (DATA.stat_tiles.resting_hr ?? "–") + " bpm" },
   stress: { title: "Avg Stress", subtitle: () => (DATA.stat_tiles.avg_stress ?? "–") + " / 100" },
   hrzones: { title: "Heart Rate Zone Split", subtitle: () => (DATA.hr_zones.aggregate.easy_pct ?? "–") + "% easy (Z1-Z2), last " + DATA.recent_runs_days + " days" },
+  bodybattery: { title: "Body Battery", subtitle: () => (DATA.stat_tiles.body_battery ?? "–") + " / 100, most recent reading" },
   "pred-5k": { title: "5K Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["5k_s"]) },
   "pred-10k": { title: "10K Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["10k_s"]) },
   "pred-half": { title: "Half Marathon Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["half_s"]) },
@@ -1341,6 +1362,15 @@ function renderModalChart(key) {
           ],
         },
         options: modalLineOptions(rows, r => r.date),
+      };
+    }
+  } else if (key === "bodybattery") {
+    const rows = DATA.wellness.body_battery.filter(r => r.level_end !== null && r.level_end !== undefined);
+    if (rows.length) {
+      cfg = {
+        type: "line",
+        data: { labels: rows.map(r => r.date), datasets: [{ label: "End-of-day level", data: rows.map(r => r.level_end), borderColor: css("--series-7"), backgroundColor: css("--series-7"), pointRadius: 2, borderWidth: 2, tension: 0.25 }] },
+        options: { ...modalLineOptions(rows, r => r.date), plugins: { legend: { display: false } } },
       };
     }
   } else if (key === "hrzones") {
@@ -1584,6 +1614,49 @@ function metricContent(key) {
       </div>`;
   }
 
+  if (key === "bodybattery") {
+    const current = t.body_battery;
+    if (current === null || current === undefined) {
+      return `<div class="modal-section"><p>No Body Battery reading available yet.</p></div>`;
+    }
+    const trend = bbTrend();
+    let pill, trendText;
+    if (!trend) {
+      pill = statusPill("neutral", "insufficient data");
+      trendText = "Not enough history yet to compare recent readings against a prior baseline.";
+    } else {
+      const delta = trend.recent - trend.prior;
+      if (delta <= -8) {
+        pill = statusPill("bad", "declining");
+        trendText = `Your end-of-day level has dropped noticeably over the last week (${trend.recent.toFixed(0)} vs ${trend.prior.toFixed(0)} the week before, ${fmtSigned(delta, 0)}) &mdash; a sign of accumulating fatigue that isn't fully clearing overnight. Worth pairing with an easier few days.`;
+      } else if (delta >= 8) {
+        pill = statusPill("good", "recovering");
+        trendText = `Your end-of-day level has climbed over the last week (${trend.recent.toFixed(0)} vs ${trend.prior.toFixed(0)}, ${fmtSigned(delta, 0)}) &mdash; consistent with recovering / rebuilding reserve.`;
+      } else {
+        pill = statusPill("neutral", "stable");
+        trendText = `Roughly stable week over week (${trend.recent.toFixed(0)} vs ${trend.prior.toFixed(0)}).`;
+      }
+    }
+    return `
+      <div class="modal-section">
+        <h4>What it measures</h4>
+        <p>Body Battery is Garmin's 0&ndash;100 estimate of your physical energy reserve. It starts from an overnight baseline, drains through the day based on stress, activity, and mental/physical exertion, then recharges during rest &mdash; deep sleep recharges it the most.</p>
+      </div>
+      <div class="modal-section">
+        <h4>A caveat specific to your devices</h4>
+        <p>${DATA.wellness.body_battery_note}</p>
+      </div>
+      <div class="modal-section">
+        <h4>Your recent trend</h4>
+        ${pill}
+        <p>Most recent reading: <b>${current}</b>/100. ${trendText}</p>
+      </div>
+      <div class="modal-section">
+        <h4>How to use it</h4>
+        <p>Given the reduced input set, treat Body Battery as a coarse cross-check, not a standalone verdict. Read it alongside Fatigue (ATL) and Resting HR: if all three agree &mdash; ATL running high, RHR elevated, Body Battery trending down &mdash; that's a real signal to back off. If Body Battery disagrees with the other two, weight ATL/RHR more heavily; they're built from more directly-measured inputs on your hardware.</p>
+      </div>`;
+  }
+
   if (key === "hrzones") {
     const agg = DATA.hr_zones.aggregate;
     if (agg.easy_pct === null || agg.easy_pct === undefined) {
@@ -1714,6 +1787,7 @@ function renderAll() {
   renderIntensityMeter();
   renderFitnessAge();
   renderRhrChart();
+  renderBbDegradedNote();
   renderBatteryChart();
   renderStressChart();
   renderVo2Chart();
