@@ -339,6 +339,17 @@ def fetch_fitness_age(client, on_date: str) -> Optional[dict]:
     }
 
 
+def compute_age(birth_date: Optional[str]) -> Optional[int]:
+    if not birth_date:
+        return None
+    try:
+        born = date.fromisoformat(birth_date)
+    except ValueError:
+        return None
+    today = date.today()
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
 def fetch_floors_available(client, on_date: str) -> bool:
     """This account's devices (Forerunner 45/45S/55) have no barometric
     altimeter, so this always comes back empty -- probed once per run so the
@@ -710,6 +721,7 @@ def main() -> None:
             "height_cm": HEIGHT_CM, "weight_kg": WEIGHT_KG,
             "threshold_hr": threshold_hr, "threshold_source": threshold_source,
             "max_hr": round(max_hr), "resting_hr_baseline": round(resting_hr_default),
+            "age": compute_age(profile.get("birth_date")), "gender": gender,
         },
         "personal_bests": PERSONAL_BESTS,
         "predictions": {

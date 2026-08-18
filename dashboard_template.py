@@ -233,6 +233,53 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
 .meter-value b { color: var(--text-primary); font-weight: 800; font-size: 15px; }
 .fitness-age-value { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
 .fitness-age-value .u { font-size: 12px; font-weight: 400; color: var(--text-secondary); margin-left: 3px; }
+
+/* clickable tiles */
+.tile, .pred-tile { cursor: pointer; transition: transform 0.12s, border-color 0.12s; }
+.tile:hover, .pred-tile:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--series-1) 45%, var(--border)); }
+.tile:focus-visible, .pred-tile:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+.tile .tap-hint, .pred-tile .tap-hint { font-size: 10px; color: var(--text-muted); margin-top: 8px; opacity: 0.7; }
+
+/* metric detail modal */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100; display: none;
+  background: color-mix(in srgb, black 55%, transparent);
+  align-items: flex-start; justify-content: center;
+  padding: 48px 16px; overflow-y: auto;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface-1); border: 1px solid var(--border); box-shadow: var(--shadow-card);
+  border-radius: 16px; padding: var(--sp-5); max-width: 640px; width: 100%; margin: auto 0;
+}
+.modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: var(--sp-4); }
+.modal-head h2 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+.modal-subtitle { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.modal-close {
+  border: 1px solid var(--border); background: transparent; color: var(--text-secondary);
+  border-radius: 8px; width: 32px; height: 32px; font-size: 18px; line-height: 1; cursor: pointer;
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+}
+.modal-close:hover { color: var(--text-primary); background: rgba(127,127,127,0.10); }
+.modal-chart { position: relative; height: 220px; margin-bottom: var(--sp-4); }
+.modal-section { margin-bottom: var(--sp-4); }
+.modal-section:last-child { margin-bottom: 0; }
+.modal-section h4 {
+  margin: 0 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-muted);
+}
+.modal-section p { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
+.modal-section ul { margin: 0 0 8px; padding-left: 18px; }
+.modal-section li { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+.modal-status {
+  display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11.5px;
+  font-weight: 700; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.modal-status.status-good { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+.modal-status.status-warn { background: color-mix(in srgb, var(--warning) 22%, transparent); color: #8a5a00; }
+.modal-status.status-bad { background: color-mix(in srgb, var(--critical) 18%, transparent); color: var(--critical); }
+.modal-status.status-neutral { background: rgba(127,127,127,0.15); color: var(--text-muted); }
+@media (prefers-color-scheme: dark) { .modal-status.status-warn { color: var(--warning); } }
 </style>
 </head>
 <body>
@@ -427,6 +474,20 @@ table.data-table tbody tr:hover { background: rgba(127,127,127,0.06); }
   <div class="footer-note" id="generated-at"></div>
 </div>
 
+<div class="modal-overlay" id="metric-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2 id="modal-title"></h2>
+        <div class="modal-subtitle" id="modal-subtitle"></div>
+      </div>
+      <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-chart" id="modal-chart-wrap"><canvas id="modal-chart-canvas"></canvas></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
 <script>
 const DATA = __DASHBOARD_DATA__;
 let UNIT = "km";
@@ -532,18 +593,24 @@ function renderPredictions() {
   el.innerHTML = "";
   const cur = DATA.predictions.current;
   const defs = [
-    ["5K", cur && cur["5k_s"], "5K"],
-    ["10K", cur && cur["10k_s"], "10K"],
-    ["Half Marathon", cur && cur["half_s"], "Half Marathon"],
-    ["Marathon", cur && cur["marathon_s"], "Marathon"],
+    ["5K", cur && cur["5k_s"], "5K", "pred-5k"],
+    ["10K", cur && cur["10k_s"], "10K", "pred-10k"],
+    ["Half Marathon", cur && cur["half_s"], "Half Marathon", "pred-half"],
+    ["Marathon", cur && cur["marathon_s"], "Marathon", "pred-marathon"],
   ];
-  defs.forEach(([label, secs, pbKey]) => {
+  defs.forEach(([label, secs, pbKey, key]) => {
     const pb = DATA.personal_bests[pbKey];
     const div = document.createElement("div");
     div.className = "pred-tile";
+    div.tabIndex = 0;
+    div.setAttribute("role", "button");
+    div.setAttribute("aria-haspopup", "dialog");
+    div.dataset.metric = key;
     div.innerHTML = `<div class="dist">${label} predicted</div>
       <div class="time">${secs ? fmtTimeShort(secs) : "–"}</div>
       <div class="pb">PB: ${pb ? fmtTimeShort(pb) : "no PB yet"}</div>`;
+    div.addEventListener("click", () => openModal(key));
+    div.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openModal(key); } });
     el.appendChild(div);
   });
 }
@@ -567,21 +634,27 @@ function renderStatTiles() {
   const el = document.getElementById("stat-tiles");
   const t = DATA.stat_tiles;
   const tiles = [
-    { label: "Fitness (CTL, est.)", value: t.fitness, unit: "", spark: DATA.training_load.map(p => p.ctl), color: "var(--series-1)", id: "spark-fitness" },
-    { label: "Fatigue (ATL, est.)", value: t.fatigue, unit: "", spark: DATA.training_load.map(p => p.atl), color: "var(--series-2)", id: "spark-fatigue" },
-    { label: "Form (TSB, est.)", value: t.form, unit: "", spark: DATA.training_load.map(p => p.tsb), color: "var(--series-7)", id: "spark-form" },
-    { label: "7-day volume", value: null, unit: "", spark: DATA.weekly_mileage.map(w => w.km), color: "var(--series-3)", id: "spark-volume", custom: fmtDist(t.week_km) },
-    { label: "VO₂ max", value: t.vo2max ?? "–", unit: "", spark: DATA.vo2max.trend.map(p => p.value), color: "var(--series-1)", id: "spark-vo2" },
-    { label: "Resting HR", value: t.resting_hr ?? "–", unit: "bpm", spark: DATA.wellness.rhr.map(p => p.value), color: "var(--series-2)", id: "spark-rhr" },
-    { label: "Avg stress", value: t.avg_stress ?? "–", unit: "", spark: DATA.wellness.stress.map(p => p.avg), color: "var(--series-8)", id: "spark-stress" },
+    { key: "fitness", label: "Fitness (CTL, est.)", value: t.fitness, unit: "", spark: DATA.training_load.map(p => p.ctl), color: "var(--series-1)", id: "spark-fitness" },
+    { key: "fatigue", label: "Fatigue (ATL, est.)", value: t.fatigue, unit: "", spark: DATA.training_load.map(p => p.atl), color: "var(--series-2)", id: "spark-fatigue" },
+    { key: "form", label: "Form (TSB, est.)", value: t.form, unit: "", spark: DATA.training_load.map(p => p.tsb), color: "var(--series-7)", id: "spark-form" },
+    { key: "volume", label: "7-day volume", value: null, unit: "", spark: DATA.weekly_mileage.map(w => w.km), color: "var(--series-3)", id: "spark-volume", custom: fmtDist(t.week_km) },
+    { key: "vo2max", label: "VO₂ max", value: t.vo2max ?? "–", unit: "", spark: DATA.vo2max.trend.map(p => p.value), color: "var(--series-1)", id: "spark-vo2" },
+    { key: "rhr", label: "Resting HR", value: t.resting_hr ?? "–", unit: "bpm", spark: DATA.wellness.rhr.map(p => p.value), color: "var(--series-2)", id: "spark-rhr" },
+    { key: "stress", label: "Avg stress", value: t.avg_stress ?? "–", unit: "", spark: DATA.wellness.stress.map(p => p.avg), color: "var(--series-8)", id: "spark-stress" },
   ];
   el.innerHTML = "";
   tiles.forEach(tile => {
     const div = document.createElement("div");
     div.className = "tile";
+    div.tabIndex = 0;
+    div.setAttribute("role", "button");
+    div.setAttribute("aria-haspopup", "dialog");
+    div.dataset.metric = tile.key;
     div.innerHTML = `<div class="label">${tile.label}</div>
       <div class="value">${tile.custom ?? tile.value}${tile.unit ? `<span class="u">${tile.unit}</span>` : ""}</div>
       <div class="spark-wrap"><canvas id="${tile.id}"></canvas></div>`;
+    div.addEventListener("click", () => openModal(tile.key));
+    div.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openModal(tile.key); } });
     el.appendChild(div);
   });
   tiles.forEach(tile => sparkline(tile.id, tile.spark.filter(v => v !== null && v !== undefined), tile.color));
@@ -965,6 +1038,477 @@ function renderRunsTable() {
     recentRuns());
   document.getElementById("table-runs").classList.add("visible");
 }
+
+/* ---------- metric detail modal ---------- */
+function fmtSigned(v, digits) {
+  if (v === null || v === undefined || isNaN(v)) return "–";
+  digits = digits === undefined ? 1 : digits;
+  return (v > 0 ? "+" : "") + v.toFixed(digits);
+}
+function fmtGap(sec) {
+  if (sec === null || sec === undefined) return "–";
+  return (sec < 0 ? "-" : "+") + fmtTimeShort(Math.abs(sec));
+}
+function statusPill(cls, text) { return `<div class="modal-status status-${cls}">${text}</div>`; }
+
+function modalLineOptions(rows, dateAcc) {
+  const grid = baseGridOptions();
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: { legend: { labels: { color: css("--text-secondary"), boxWidth: 10, font: { size: 11 } } } },
+    scales: {
+      x: { ticks: { ...grid.ticks, maxTicksLimit: 8, callback: (v, i) => fmtDate(dateAcc(rows[i])) }, grid: { display: false }, border: grid.border },
+      y: { ticks: grid.ticks, grid: grid.grid, border: grid.border },
+    },
+  };
+}
+
+/* VO2max classification: approximate adult norm bands (general population,
+   Cooper-Institute-style mL/kg/min charts), by gender + age bracket. */
+const VO2_NORMS = {
+  FEMALE: [
+    { maxAge: 29, bands: [23, 29, 35, 41, 47] },
+    { maxAge: 39, bands: [21, 27, 33, 39, 45] },
+    { maxAge: 49, bands: [20, 25, 31, 37, 43] },
+    { maxAge: 999, bands: [18, 23, 28, 34, 40] },
+  ],
+  MALE: [
+    { maxAge: 29, bands: [30, 38, 44, 51, 56] },
+    { maxAge: 39, bands: [28, 34, 41, 47, 53] },
+    { maxAge: 49, bands: [25, 31, 38, 44, 50] },
+    { maxAge: 999, bands: [21, 26, 32, 39, 45] },
+  ],
+};
+const VO2_LABELS = ["low", "below average", "average", "good", "very good", "excellent"];
+function classifyVo2(vo2, age, gender) {
+  const table = VO2_NORMS[gender] || VO2_NORMS.FEMALE;
+  const group = table.find(g => (age || 32) <= g.maxAge) || table[table.length - 1];
+  let idx = group.bands.findIndex(b => vo2 < b);
+  if (idx === -1) idx = group.bands.length;
+  return VO2_LABELS[idx];
+}
+
+function ctlTrend() {
+  const rows = DATA.training_load;
+  if (rows.length < 8) return null;
+  const now = rows[rows.length - 1].ctl;
+  const priorIdx = Math.max(0, rows.length - 1 - 28);
+  const prior = rows[priorIdx].ctl;
+  return { now, prior, delta: now - prior, days: rows.length - 1 - priorIdx };
+}
+function loadRatio() {
+  const rows = DATA.training_load;
+  const latest = rows.length ? rows[rows.length - 1] : { ctl: 0, atl: 0 };
+  const ratio = latest.ctl > 0.5 ? latest.atl / latest.ctl : null;
+  return { ctl: latest.ctl, atl: latest.atl, tsb: latest.ctl - latest.atl, ratio };
+}
+function typicalMarathonBand(weeksLeft) {
+  if (weeksLeft > 16) return { label: "base phase", lo: 20, hi: 40 };
+  if (weeksLeft > 8) return { label: "build phase", lo: 40, hi: 65 };
+  if (weeksLeft > 3) return { label: "peak phase", lo: 55, hi: 80 };
+  return { label: "taper", lo: 20, hi: 45 };
+}
+function rhrBaselineVsRecent() {
+  const rows = DATA.wellness.rhr;
+  if (rows.length < 10) return null;
+  const recent = rows.slice(-7);
+  const rest = rows.slice(0, -7);
+  const avg = arr => arr.reduce((a, b) => a + b.value, 0) / arr.length;
+  return { recent: avg(recent), baseline: rest.length ? avg(rest) : avg(recent) };
+}
+function stressRecentVsPrior() {
+  const rows = DATA.wellness.stress;
+  if (rows.length < 10) return null;
+  const recent = rows.slice(-7);
+  const rest = rows.slice(0, -7);
+  const avg = arr => arr.reduce((a, b) => a + b.avg, 0) / arr.length;
+  return { recent: avg(recent), prior: rest.length ? avg(rest) : avg(recent) };
+}
+function stressBand(v) {
+  if (v === null || v === undefined) return { label: "unknown", cls: "neutral" };
+  if (v <= 25) return { label: "rest", cls: "good" };
+  if (v <= 50) return { label: "low", cls: "good" };
+  if (v <= 75) return { label: "medium", cls: "warn" };
+  return { label: "high", cls: "bad" };
+}
+
+const METRIC_META = {
+  fitness: { title: "Fitness (CTL)", subtitle: () => DATA.stat_tiles.fitness + " · estimated 42-day training load" },
+  fatigue: { title: "Fatigue (ATL)", subtitle: () => DATA.stat_tiles.fatigue + " · estimated 7-day training load" },
+  form: { title: "Form (TSB)", subtitle: () => DATA.stat_tiles.form + " · fitness minus fatigue" },
+  volume: { title: "7-Day Volume", subtitle: () => fmtDist(DATA.stat_tiles.week_km) + " this week" },
+  vo2max: { title: "VO₂ max", subtitle: () => (DATA.stat_tiles.vo2max ?? "–") + " mL/kg/min" },
+  rhr: { title: "Resting Heart Rate", subtitle: () => (DATA.stat_tiles.resting_hr ?? "–") + " bpm" },
+  stress: { title: "Avg Stress", subtitle: () => (DATA.stat_tiles.avg_stress ?? "–") + " / 100" },
+  "pred-5k": { title: "5K Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["5k_s"]) },
+  "pred-10k": { title: "10K Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["10k_s"]) },
+  "pred-half": { title: "Half Marathon Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["half_s"]) },
+  "pred-marathon": { title: "Marathon Prediction", subtitle: () => fmtTimeShort(DATA.predictions.current && DATA.predictions.current["marathon_s"]) },
+};
+
+function renderModalChart(key) {
+  destroyChart("modal");
+  const wrap = document.getElementById("modal-chart-wrap");
+  const ctx = document.getElementById("modal-chart-canvas");
+  let cfg = null;
+
+  if (key === "fitness" || key === "fatigue" || key === "form") {
+    const rows = DATA.training_load;
+    cfg = {
+      type: "line",
+      data: {
+        labels: rows.map(r => r.date),
+        datasets: [
+          { label: "Fitness (CTL)", data: rows.map(r => r.ctl), borderColor: css("--series-1"), borderWidth: key === "fitness" ? 2.5 : 1.3, pointRadius: 0, tension: 0.25 },
+          { label: "Fatigue (ATL)", data: rows.map(r => r.atl), borderColor: css("--series-2"), borderWidth: key === "fatigue" ? 2.5 : 1.3, pointRadius: 0, tension: 0.25 },
+          { label: "Form (TSB)", data: rows.map(r => r.tsb), borderColor: css("--series-7"), borderWidth: key === "form" ? 2.5 : 1.3, pointRadius: 0, tension: 0.25, borderDash: [4, 3] },
+        ],
+      },
+      options: modalLineOptions(rows, r => r.date),
+    };
+  } else if (key === "volume") {
+    const rows = DATA.weekly_mileage;
+    const dist = rows.map(r => UNIT === "km" ? r.km : r.km * 0.621371);
+    const trend = rows.map(r => UNIT === "km" ? r.trend_km : r.trend_km * 0.621371);
+    cfg = {
+      data: {
+        labels: rows.map(r => r.week_start),
+        datasets: [
+          { type: "bar", label: "Weekly " + UNIT, data: dist, backgroundColor: css("--series-3"), borderRadius: 4, maxBarThickness: 24 },
+          { type: "line", label: "Trend", data: trend, borderColor: css("--series-2"), borderWidth: 2, pointRadius: 0, tension: 0.15 },
+        ],
+      },
+      options: modalLineOptions(rows, r => r.week_start),
+    };
+  } else if (key === "vo2max") {
+    const rows = DATA.vo2max.trend;
+    if (rows.length) {
+      cfg = {
+        type: "line",
+        data: { labels: rows.map(r => r.date), datasets: [{ label: "VO₂ max", data: rows.map(r => r.value), borderColor: css("--series-1"), backgroundColor: css("--series-1"), stepped: true, pointRadius: 3, borderWidth: 2 }] },
+        options: { ...modalLineOptions(rows, r => r.date), plugins: { legend: { display: false } } },
+      };
+    }
+  } else if (key === "rhr") {
+    const rows = DATA.wellness.rhr;
+    if (rows.length) {
+      cfg = {
+        type: "line",
+        data: {
+          labels: rows.map(r => r.date),
+          datasets: [
+            { label: "Daily", data: rows.map(r => r.value), borderColor: css("--series-1"), pointRadius: 2, borderWidth: 1.5, tension: 0.2 },
+            { label: "7-day avg", data: rows.map(r => r.rolling7), borderColor: css("--series-2"), pointRadius: 0, borderWidth: 2, tension: 0.25 },
+          ],
+        },
+        options: modalLineOptions(rows, r => r.date),
+      };
+    }
+  } else if (key === "stress") {
+    const rows = DATA.wellness.stress;
+    if (rows.length) {
+      cfg = {
+        type: "line",
+        data: {
+          labels: rows.map(r => r.date),
+          datasets: [
+            { label: "Avg", data: rows.map(r => r.avg), borderColor: css("--series-1"), pointRadius: 0, borderWidth: 2, tension: 0.25 },
+            { label: "Max", data: rows.map(r => r.max), borderColor: css("--series-8"), pointRadius: 0, borderWidth: 1.5, borderDash: [3, 3], tension: 0.25 },
+          ],
+        },
+        options: modalLineOptions(rows, r => r.date),
+      };
+    }
+  } else if (key.startsWith("pred-")) {
+    const field = { "pred-5k": "5k_s", "pred-10k": "10k_s", "pred-half": "half_s", "pred-marathon": "marathon_s" }[key];
+    const hist = (DATA.predictions.history || []).filter(h => h[field]);
+    if (hist.length >= 2) {
+      cfg = {
+        type: "line",
+        data: { labels: hist.map(h => h.date), datasets: [{ label: "Predicted (min)", data: hist.map(h => h[field] / 60), borderColor: css("--series-1"), backgroundColor: css("--series-1"), pointRadius: 3, borderWidth: 2, tension: 0.2 }] },
+        options: { ...modalLineOptions(hist, r => r.date), plugins: { legend: { display: false } } },
+      };
+    }
+  }
+
+  if (!cfg) {
+    wrap.style.display = "none";
+    return;
+  }
+  wrap.style.display = "";
+  charts.modal = new Chart(ctx, cfg);
+}
+
+function metricContent(key) {
+  const t = DATA.stat_tiles;
+  const p = DATA.profile;
+
+  if (key === "vo2max") {
+    const vo2 = t.vo2max;
+    if (vo2 === null || vo2 === undefined) {
+      return `<div class="modal-section"><p>No VO₂max reading available yet.</p></div>`;
+    }
+    const gender = p.gender === "FEMALE" ? "FEMALE" : "MALE";
+    const cls = classifyVo2(vo2, p.age, gender);
+    const clsPill = { low: "bad", "below average": "warn", average: "warn", good: "good", "very good": "good", excellent: "good" }[cls] || "neutral";
+    const ageNote = p.age ? `for a ${p.age}-year-old ${gender === "FEMALE" ? "woman" : "man"}` : "for an adult (age not available from your Garmin profile)";
+    return `
+      <div class="modal-section">
+        <h4>What it measures</h4>
+        <p>VO₂max is the maximum rate your body can consume oxygen during exercise (mL of O₂ per kg of body weight per minute). It's a hard ceiling on aerobic capacity &mdash; a higher number means more fuel available for aerobic running effort, which generally correlates with faster sustainable race paces.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Where you stand</h4>
+        ${statusPill(clsPill, cls)}
+        <p>${vo2} mL/kg/min falls in the <b>${cls}</b> band on general-population adult norm charts ${ageNote}. Note these general-population bands undersell trained runners: among competitive ${gender === "FEMALE" ? "female" : "male"} distance runners, ${gender === "FEMALE" ? "45-55 is a strong sub-elite range and 55-70+ is elite" : "50-60 is strong sub-elite and 60-75+ is elite"} &mdash; so ${vo2} is a genuinely strong aerobic engine, with room to keep climbing through targeted training.</p>
+      </div>
+      <div class="modal-section">
+        <h4>How to raise it</h4>
+        <ul>
+          <li><b>VO₂max intervals</b> at ~3K&ndash;5K effort: e.g. 5&ndash;6 &times; 3min hard (roughly current 5K pace) with 2&ndash;3min easy jog recovery. This is the most direct stimulus for raising the ceiling itself.</li>
+          <li><b>Tempo/threshold runs</b> at ${p.threshold_hr ? p.threshold_hr + " bpm" : "your threshold HR"}, 20&ndash;30min continuous: raises how much of that ceiling you can sustain, which is what actually shows up in race times.</li>
+          <li><b>Aerobic volume</b>: easy mileage doesn't move VO₂max much directly but supports recovery between hard sessions, letting you hit them at full quality.</li>
+        </ul>
+      </div>
+      <div class="modal-section">
+        <h4>Realistic timeline</h4>
+        <p>For someone already in the good-to-excellent range, a focused 8&ndash;12 week block with 1&ndash;2 quality sessions/week typically yields ~1&ndash;3 mL/kg/min (roughly 2&ndash;6% relative). Gains get harder as you approach your genetic ceiling &mdash; consistency over months matters more than any single workout.</p>
+        <h4>This week</h4>
+        <ul>
+          <li>1 VO₂max session: 5 &times; 3min @ 5K effort / 2min jog recovery.</li>
+          <li>1 tempo run: 20&ndash;25min continuous at threshold effort.</li>
+          <li>Keep 2&ndash;3 easy aerobic days around them &mdash; don't stack hard days back-to-back.</li>
+        </ul>
+      </div>`;
+  }
+
+  if (key === "fitness") {
+    const trend = ctlTrend();
+    const rows = DATA.plan.weeks || [];
+    const peak = rows.length ? rows.reduce((a, b) => (b.target_km > a.target_km ? b : a)) : null;
+    let trendText = "Not enough training history yet to establish a trend.";
+    let pill = statusPill("neutral", "insufficient data");
+    if (trend) {
+      const dir = trend.delta > 0.5 ? "risen" : trend.delta < -0.5 ? "fallen" : "held roughly steady";
+      const pillCls = trend.delta > 0.5 ? "good" : trend.delta < -0.5 ? "bad" : "neutral";
+      pill = statusPill(pillCls, dir === "held roughly steady" ? "stagnant" : dir);
+      trendText = `Over the last ${trend.days} days your estimated Fitness has ${dir}, from ${trend.prior.toFixed(1)} to ${trend.now.toFixed(1)} (${fmtSigned(trend.delta)}).`;
+    }
+    return `
+      <div class="modal-section">
+        <h4>What it measures</h4>
+        <p>Fitness (CTL) is your accumulated training load, averaged with a slow 42-day time constant &mdash; it reflects the aerobic base you've built over the last month and a half, not any single run. It rises slowly and falls slowly, by design.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Your trend</h4>
+        ${pill}
+        <p>${trendText}</p>
+      </div>
+      <div class="modal-section">
+        <h4>Building toward race day</h4>
+        <p>Your generated Plan targets a peak week of ${peak ? fmtDist(peak.target_km) : "–"}${peak ? " around week " + peak.week_num : ""}. Fitness only rises if training load keeps climbing week over week &mdash; the standard safe progression is <b>no more than ~10% weekly volume increase</b>, with a lighter down-week roughly every 3&ndash;4 weeks to let CTL consolidate instead of just chasing ATL spikes. If Fitness looks flat, the usual cause is a mileage plateau, not a training-response problem &mdash; check the Plan section for whether you're actually hitting target volumes.</p>
+      </div>`;
+  }
+
+  if (key === "fatigue") {
+    const lr = loadRatio();
+    let pill, advice;
+    if (lr.ratio === null) {
+      pill = statusPill("neutral", "insufficient data");
+      advice = "Not enough training history yet to compute a reliable Fatigue-to-Fitness ratio.";
+    } else if (lr.ratio > 1.5) {
+      pill = statusPill("bad", "high &mdash; overreaching risk");
+      advice = "Fatigue is climbing meaningfully faster than Fitness &mdash; classic overreaching territory. Add an extra easy or full rest day this week, and downgrade your next scheduled hard session to an easy aerobic run until Form (TSB) recovers back toward zero.";
+    } else if (lr.ratio > 1.3) {
+      pill = statusPill("warn", "elevated");
+      advice = "Fatigue is running a bit ahead of Fitness. Not an emergency, but worth watching &mdash; keep an eye on sleep, easy-run heart rate drift, and how the next hard session feels before adding more load.";
+    } else if (lr.ratio >= 0.8) {
+      pill = statusPill("good", "productive zone");
+      advice = "This is a normal, productive training relationship between short-term and long-term load &mdash; fatigue rising a bit while fitness catches up is exactly what a training block should look like.";
+    } else {
+      pill = statusPill("neutral", "low load");
+      advice = "Fatigue is well below Fitness right now, meaning recent training load has been light relative to your base &mdash; fine during a taper or recovery week, but a signal to add volume if you're mid-build.";
+    }
+    return `
+      <div class="modal-section">
+        <h4>What it measures</h4>
+        <p>Fatigue (ATL) is short-term training load, averaged with a fast 7-day time constant. It reacts quickly to what you did this week, unlike the slow-moving Fitness number.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Overtraining check</h4>
+        ${pill}
+        <p>Fatigue/Fitness ratio: ${lr.ratio !== null ? lr.ratio.toFixed(2) : "–"} (ATL ${lr.atl.toFixed(1)} vs CTL ${lr.ctl.toFixed(1)}). As a rough guide: 0.8&ndash;1.3 is a healthy training zone, 1.3&ndash;1.5 is elevated, and above 1.5 tracks with classic overreaching/injury-risk ranges (the same logic behind acute:chronic workload ratio guidance used in sports science).</p>
+        <p>${advice}</p>
+      </div>`;
+  }
+
+  if (key === "form") {
+    const lr = loadRatio();
+    const tsb = lr.tsb;
+    let pill, band;
+    if (tsb < -30) { pill = statusPill("bad", "very fatigued"); band = "Below -30 usually means you're carrying heavy accumulated fatigue &mdash; fine briefly at peak training load, risky to sit in for long."; }
+    else if (tsb < -10) { pill = statusPill("warn", "in training"); band = "-10 to -30 is typical of solid build/peak training blocks &mdash; you're absorbing real load, which is the point, but it's not a day to expect a fast time trial."; }
+    else if (tsb <= 5) { pill = statusPill("neutral", "grey zone"); band = "-10 to +5 is a neutral zone &mdash; neither notably fatigued nor fresh."; }
+    else if (tsb <= 25) { pill = statusPill("good", "fresh"); band = "+5 to +25 is a fresh, race-ready zone &mdash; this is roughly where you want to be on race morning."; }
+    else { pill = statusPill("neutral", "very fresh"); band = "Above +25 usually means you've backed off more than needed &mdash; fine right before a race, a detraining risk if it persists for weeks."; }
+
+    const raceDate = new Date(DATA.race.date + "T00:00:00");
+    const taperStart = new Date(raceDate);
+    taperStart.setDate(taperStart.getDate() - 18);
+    const taperStr = taperStart.toISOString().slice(0, 10);
+    const weeksLeft = DATA.race.weeks_left;
+
+    return `
+      <div class="modal-section">
+        <h4>What it measures</h4>
+        <p>Form (TSB) is Fitness minus Fatigue &mdash; a "freshness" score. Negative means you're carrying more short-term fatigue than your base can currently absorb (typical while training hard); positive means you've shed fatigue faster than fitness, i.e. you're fresh.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Reading your number</h4>
+        ${pill}
+        <p>Current TSB: ${tsb.toFixed(1)}. ${band}</p>
+      </div>
+      <div class="modal-section">
+        <h4>Planning your taper</h4>
+        <p>You're about ${weeksLeft} weeks from ${DATA.race.name}. A typical marathon taper starts 2&ndash;3 weeks out (around <b>${fmtDate(taperStr)}</b> for your race date), cutting weekly volume by roughly 20&ndash;40% while keeping some race-pace touches, with the goal of arriving at the start line with TSB back in the fresh +5 to +15 range rather than deep in the negatives.</p>
+      </div>`;
+  }
+
+  if (key === "volume") {
+    const weeksLeft = DATA.race.weeks_left;
+    const band = typicalMarathonBand(weeksLeft);
+    const weekKm = t.week_km;
+    const status = weekKm < band.lo ? "under" : weekKm > band.hi ? "over" : "within";
+    const pill = status === "under" ? statusPill("warn", "below typical range") : status === "over" ? statusPill("good", "above typical range") : statusPill("good", "within typical range");
+    const next1 = Math.round(weekKm * 1.1 * 10) / 10;
+    const next2 = Math.round(next1 * 1.1 * 10) / 10;
+    return `
+      <div class="modal-section">
+        <h4>Where this fits your marathon block</h4>
+        ${pill}
+        <p>At ${weeksLeft} weeks out, a typical recreational marathon block is in its <b>${band.label}</b>, commonly running <b>${band.lo}&ndash;${band.hi} km/week</b>. Your current week is <b>${fmtDist(weekKm)}</b> &mdash; ${status === "under" ? "meaningfully below that range, which is the main thing worth addressing before anything else in this plan" : status === "over" ? "above the typical range, which is fine if it's been progressive and recovery is keeping up" : "within the typical range for this stage"}.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Next 2 weeks</h4>
+        <p>Using a conservative ~10%/week ramp from your current volume: <b>${fmtDist(next1)}</b> next week, then <b>${fmtDist(next2)}</b> the week after, with easy pace on the added distance. If that still leaves you short of the block's typical range with limited weeks left, prioritize consistency (running more often, even short) over any single long run.</p>
+      </div>`;
+  }
+
+  if (key === "rhr") {
+    const cmp = rhrBaselineVsRecent();
+    let pill, text;
+    if (!cmp) {
+      pill = statusPill("neutral", "insufficient data");
+      text = "Not enough resting-HR history yet to compare recent readings against a baseline.";
+    } else {
+      const delta = cmp.recent - cmp.baseline;
+      if (delta >= 7) { pill = statusPill("bad", "notably elevated"); text = `Your last 7 days average ${cmp.recent.toFixed(1)} bpm vs a ${cmp.baseline.toFixed(1)} bpm baseline &mdash; a jump of ${fmtSigned(delta)} bpm is a meaningful signal (illness, poor sleep, or under-recovery are common causes). Worth an easier few days.`; }
+      else if (delta >= 4) { pill = statusPill("warn", "slightly elevated"); text = `Last 7 days average ${cmp.recent.toFixed(1)} bpm vs baseline ${cmp.baseline.toFixed(1)} bpm (${fmtSigned(delta)} bpm). Not alarming on its own, but worth watching alongside how easy runs are feeling.`; }
+      else if (delta <= -3) { pill = statusPill("good", "trending down"); text = `Last 7 days average ${cmp.recent.toFixed(1)} bpm vs baseline ${cmp.baseline.toFixed(1)} bpm (${fmtSigned(delta)} bpm) &mdash; a falling RHR is generally a good sign of improving aerobic fitness and recovery.`; }
+      else { pill = statusPill("good", "stable"); text = `Last 7 days average ${cmp.recent.toFixed(1)} bpm vs baseline ${cmp.baseline.toFixed(1)} bpm &mdash; essentially stable, no recovery flag.`; }
+    }
+    return `
+      <div class="modal-section">
+        <h4>What it indicates</h4>
+        <p>Resting heart rate reflects how hard your heart works at rest, mainly driven by cardiovascular fitness and recovery state. A gradually falling RHR over weeks/months usually tracks improving aerobic fitness; a sudden rise of several bpm above your personal baseline for multiple consecutive days is a common early flag for under-recovery, incoming illness, or accumulated fatigue &mdash; more useful as a trend than any single day's reading.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Your recent trend</h4>
+        ${pill}
+        <p>${text}</p>
+      </div>`;
+  }
+
+  if (key === "stress") {
+    const cmp = stressRecentVsPrior();
+    const band = stressBand(t.avg_stress);
+    let trendText = "Not enough stress history yet to compare recent days against prior weeks.";
+    if (cmp) {
+      const delta = cmp.recent - cmp.prior;
+      trendText = `Last 7 days average ${cmp.recent.toFixed(0)} vs ${cmp.prior.toFixed(0)} in the prior period (${fmtSigned(delta, 0)}).`;
+    }
+    return `
+      <div class="modal-section">
+        <h4>What it measures</h4>
+        <p>Garmin's stress score (0&ndash;100) is derived from heart-rate-variability patterns through the day. Garmin's own bands: 0&ndash;25 <i>resting</i>, 26&ndash;50 <i>low</i>, 51&ndash;75 <i>medium</i>, 76&ndash;100 <i>high</i>. It reflects overall physiological stress, not just training &mdash; sleep, illness and life stress all feed into it.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Where you are</h4>
+        ${statusPill(band.cls, band.label + " band")}
+        <p>Current average: ${t.avg_stress ?? "–"}/100. ${trendText} ${band.cls === "warn" || band.cls === "bad" ? "A sustained average in the medium-to-high band alongside hard training weeks is a reasonable cue to prioritize sleep and add easy/recovery days before adding more training stress." : "This is a comfortable range &mdash; no particular recovery flag from stress alone right now."}</p>
+      </div>`;
+  }
+
+  if (key.startsWith("pred-")) {
+    const meta = { "pred-5k": ["5k_s", "5K", "5K"], "pred-10k": ["10k_s", "10K", "10K"], "pred-half": ["half_s", "Half Marathon", "half marathon"], "pred-marathon": ["marathon_s", "Marathon", "marathon"] }[key];
+    const [field, pbKey, label] = meta;
+    const predicted = DATA.predictions.current && DATA.predictions.current[field];
+    const pb = DATA.personal_bests[pbKey];
+    const gap = (predicted && pb) ? predicted - pb : null;
+    const focus = {
+      "5K": "Short, fast VO₂max-pace repeats (400&ndash;800m at or slightly faster than current 5K pace, full recovery) plus general speed/running-economy work close the 5K gap fastest &mdash; this distance is the most sensitive to raw VO₂max and neuromuscular speed.",
+      "10K": "A blend of VO₂max intervals and lactate-threshold/tempo work. 10K sits between pure aerobic-power and sustained-threshold demands, so alternating interval weeks with tempo weeks tends to move it fastest.",
+      "half marathon": "Threshold/tempo work is the priority here &mdash; sustained efforts at or near half-marathon pace (20&ndash;40min continuous or in long intervals), plus long runs with race-pace segments woven in.",
+      "marathon": "Aerobic volume and long runs dominate marathon-specific improvement, with marathon-pace segments inside long runs and fueling/pacing practice. Threshold work still matters, but raw endurance and fat-utilization economy move this number more than short intervals do.",
+    }[label];
+    let gapText;
+    if (predicted && pb) {
+      gapText = gap < 0
+        ? `Your current fitness predicts a time <b>${fmtTimeShort(Math.abs(gap))} faster</b> than your PB &mdash; you may be in shape for a new PR attempt on this distance right now.`
+        : `Predicted time is <b>${fmtTimeShort(gap)} slower</b> than your PB. That's normal &mdash; predictions track current fitness, and a strong PB can reflect a peak-fitness/perfect-conditions day that current training hasn't caught back up to yet.`;
+    } else if (predicted) {
+      gapText = "You don't have a recorded PB for this distance yet &mdash; this predicted time is your current fitness ceiling estimate for it.";
+    } else {
+      gapText = "No prediction available for this distance yet.";
+    }
+    return `
+      <div class="modal-section">
+        <h4>How this is calculated</h4>
+        <p>Garmin derives race predictions primarily from your current VO₂max estimate combined with recent training history, using a VDOT/Daniels-Gilbert-style formula &mdash; not from a single time trial. That means the number moves as your VO₂max and training load change, and can lag behind (or run ahead of) a single standout or off race performance.</p>
+      </div>
+      <div class="modal-section">
+        <h4>Gap to your PB</h4>
+        <p>${gapText}</p>
+      </div>
+      <div class="modal-section">
+        <h4>What closes this gap fastest</h4>
+        <p>${focus}</p>
+      </div>`;
+  }
+
+  return `<div class="modal-section"><p>No detail available.</p></div>`;
+}
+
+let lastModalTrigger = null;
+function openModal(key) {
+  lastModalTrigger = document.activeElement;
+  const meta = METRIC_META[key];
+  if (!meta) return;
+  document.getElementById("modal-title").textContent = meta.title;
+  document.getElementById("modal-subtitle").textContent = meta.subtitle();
+  document.getElementById("modal-body").innerHTML = metricContent(key);
+  renderModalChart(key);
+  const overlay = document.getElementById("metric-modal");
+  overlay.classList.add("open");
+  document.body.style.overflow = "hidden";
+  document.getElementById("modal-close").focus();
+}
+function closeModal() {
+  const overlay = document.getElementById("metric-modal");
+  if (!overlay.classList.contains("open")) return;
+  overlay.classList.remove("open");
+  document.body.style.overflow = "";
+  destroyChart("modal");
+  if (lastModalTrigger && typeof lastModalTrigger.focus === "function") lastModalTrigger.focus();
+}
+document.getElementById("modal-close").addEventListener("click", closeModal);
+document.getElementById("metric-modal").addEventListener("click", (e) => {
+  if (e.target.id === "metric-modal") closeModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeModal();
+});
 
 /* ---------- render all + unit toggle ---------- */
 function renderAll() {
